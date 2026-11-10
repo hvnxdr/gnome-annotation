@@ -304,7 +304,7 @@ pub fn arrow_geometry(start: Point, end: Point, stroke_px: f32) -> Option<ArrowG
     let dx = end[0] - start[0];
     let dy = end[1] - start[1];
     let len = line_length(start, end);
-    if !len.is_finite() || len < 1.0 {
+    if !len.is_finite() || len < MIN_DRAG_PX {
         return None;
     }
     let dir = [dx / len, dy / len];

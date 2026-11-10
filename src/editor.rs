@@ -200,6 +200,7 @@ impl Editor {
         if self.editing.is_some() {
             self.commit_text();
         }
+        self.draft = None;
         self.tool = tool;
     }
 
