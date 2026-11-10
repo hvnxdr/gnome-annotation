@@ -278,6 +278,37 @@ fn redaction_is_opaque_black_with_no_outline() {
 }
 
 #[test]
+fn an_ellipse_keeps_its_curve_when_the_drag_ends_outside() {
+    let dir = TempDir::new("ellipse-clipping");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("o"));
+    rt.frame(0.0);
+    assert!(drag(&mut rt, [3000.0, 1200.0], [4200.0, 2600.0]));
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(annotations.len(), 1);
+    let AnnotationKind::Ellipse { start, end } = annotations[0].kind else {
+        panic!("expected an ellipse, got {:?}", annotations[0].kind);
+    };
+    assert_near(start, [3000.0, 1200.0]);
+    assert_near(end, [4200.0, 2600.0]);
+
+    let image = export(&sink, &mut rt);
+    let leftmost = image.get_pixel(3000, 1900).0;
+    assert!(
+        is_annotation_red(leftmost),
+        "the leftmost point of the dragged ellipse is painted: {leftmost:?}"
+    );
+    let cropped_curve = image.get_pixel(3000, 1680).0;
+    assert!(
+        !is_annotation_red(cropped_curve),
+        "the ellipse did not shrink to the crop: {cropped_curve:?}"
+    );
+}
+
+#[test]
 fn a_click_without_a_drag_creates_no_annotation() {
     let dir = TempDir::new("zero-size");
     let fixture = write_4k_fixture(dir.path());

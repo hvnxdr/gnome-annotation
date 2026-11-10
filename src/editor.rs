@@ -287,27 +287,38 @@ impl Editor {
             w: self.source.width as f32,
             h: self.source.height as f32,
         };
-        let cropped_rect = Rect::normalized(draft.start, draft.end).crop(bounds);
-        let rect_kind = |make: fn(Point, Point) -> AnnotationKind| {
-            (!cropped_rect.is_too_small()).then_some(make(
-                [cropped_rect.x, cropped_rect.y],
-                [
-                    cropped_rect.x + cropped_rect.w,
-                    cropped_rect.y + cropped_rect.h,
-                ],
-            ))
+        let raw_rect = Rect::normalized(draft.start, draft.end);
+        let cropped_rect = raw_rect.crop(bounds);
+        let rect_kind = |rect: Rect, make: fn(Point, Point) -> AnnotationKind| {
+            (!rect.is_too_small())
+                .then_some(make([rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h]))
         };
-        let kind = match draft.tool {
-            Tool::Line => crop_segment(draft.start, draft.end, bounds)
-                .map(|(start, end)| AnnotationKind::Line { start, end }),
-            Tool::Arrow => crop_segment(draft.start, draft.end, bounds).and_then(|(start, end)| {
-                arrow_geometry(start, end, stroke_px).map(|_| AnnotationKind::Arrow { start, end })
-            }),
-            Tool::Rectangle => rect_kind(|start, end| AnnotationKind::Rectangle { start, end }),
-            Tool::Ellipse => rect_kind(|start, end| AnnotationKind::Ellipse { start, end }),
-            Tool::Redaction => rect_kind(|start, end| AnnotationKind::Redaction { start, end }),
-            Tool::Select | Tool::Text => None,
-        };
+        let kind =
+            match draft.tool {
+                Tool::Line => crop_segment(draft.start, draft.end, bounds)
+                    .map(|(start, end)| AnnotationKind::Line { start, end }),
+                // An arrowhead belongs at the drag's end point. Cropping the segment would move it
+                // inside the image, so keep the drag and let the layer clip the paint.
+                Tool::Arrow => arrow_geometry(draft.start, draft.end, stroke_px).map(|_| {
+                    AnnotationKind::Arrow {
+                        start: draft.start,
+                        end: draft.end,
+                    }
+                }),
+                Tool::Rectangle => rect_kind(cropped_rect, |start, end| {
+                    AnnotationKind::Rectangle { start, end }
+                }),
+                // Cropping the box of an ellipse changes the curve, so keep the drag box and let
+                // the image-sized layer clip the paint instead.
+                Tool::Ellipse => rect_kind(raw_rect, |start, end| AnnotationKind::Ellipse {
+                    start,
+                    end,
+                }),
+                Tool::Redaction => rect_kind(cropped_rect, |start, end| {
+                    AnnotationKind::Redaction { start, end }
+                }),
+                Tool::Select | Tool::Text => None,
+            };
         let Some(kind) = kind else {
             return;
         };
@@ -735,13 +746,13 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
             accent,
             |e| e.set_tool(Tool::Text),
         ));
-    for index in 0..PALETTE.len() {
-        toolbar = toolbar.child(color_swatch(index, editor.color == PALETTE[index], &theme));
+    for (index, color) in PALETTE.iter().enumerate() {
+        toolbar = toolbar.child(color_swatch(index, editor.color == *color, &theme));
     }
-    for index in 0..STROKE_WIDTHS_PT.len() {
+    for (index, width_pt) in STROKE_WIDTHS_PT.iter().enumerate() {
         toolbar = toolbar.child(width_button(
             index,
-            editor.width_pt == STROKE_WIDTHS_PT[index],
+            editor.width_pt == *width_pt,
             &theme,
             accent,
         ));
