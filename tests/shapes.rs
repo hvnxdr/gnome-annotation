@@ -6,12 +6,14 @@ use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
 use gnome_annotation::clipboard::MemoryClipboardSink;
+use gnome_annotation::document::AnnotationKind;
 use gnome_annotation::editor::{Editor, EditorOptions, Tool, editor_on_key, editor_view};
+use image::RgbaImage;
 use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
 use rune::{Env, Runtime, Shell, Waker};
 
-use support::{TempDir, write_4k_fixture};
+use support::{TempDir, decode_png, is_annotation_red, write_4k_fixture};
 
 fn noop_waker() -> Waker {
     Arc::new(|| {})
@@ -20,6 +22,13 @@ fn noop_waker() -> Waker {
 fn key_text(c: &str) -> KeyEvent {
     KeyEvent {
         key: Key::Text(c.to_string()),
+        mods: Mods::default(),
+    }
+}
+
+fn enter() -> KeyEvent {
+    KeyEvent {
+        key: Key::Enter,
         mods: Mods::default(),
     }
 }
@@ -71,6 +80,22 @@ fn drag(rt: &mut Runtime<Editor>, from: [f32; 2], to: [f32; 2]) -> bool {
     preview
 }
 
+/// Press Enter, assert the editor closed, and decode the PNG the clipboard sink received.
+fn export(sink: &MemoryClipboardSink, rt: &mut Runtime<Editor>) -> RgbaImage {
+    rt.key(enter());
+    rt.frame(0.0);
+    assert_eq!(
+        rt.shell_request,
+        Some(Shell::Close),
+        "Enter copies and closes"
+    );
+    let writes = sink.writes();
+    assert_eq!(writes.len(), 1, "one PNG reached the clipboard");
+    let image = decode_png(&writes[0]);
+    assert_eq!(image.dimensions(), (3840, 2160));
+    image
+}
+
 #[test]
 fn tool_keys_select_every_tool() {
     let dir = TempDir::new("shape-keys");
@@ -90,4 +115,33 @@ fn tool_keys_select_every_tool() {
         rt.frame(0.0);
         assert_eq!(rt.state.tool(), expected, "key {key} selects {expected:?}");
     }
+}
+
+#[test]
+fn line_is_drawn_by_dragging_and_exported() {
+    let dir = TempDir::new("line");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("l"));
+    rt.frame(0.0);
+    assert!(
+        drag(&mut rt, [600.0, 400.0], [1800.0, 900.0]),
+        "the line is previewed while dragging"
+    );
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(annotations.len(), 1, "one annotation was committed");
+    assert!(
+        matches!(annotations[0].kind, AnnotationKind::Line { .. }),
+        "the annotation is a line: {:?}",
+        annotations[0].kind
+    );
+
+    let image = export(&sink, &mut rt);
+    let midpoint = image.get_pixel(1200, 650).0;
+    assert!(
+        is_annotation_red(midpoint),
+        "the line paints its midpoint: {midpoint:?}"
+    );
 }

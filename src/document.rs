@@ -48,6 +48,10 @@ pub struct Annotation {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AnnotationKind {
+    Line {
+        start: Point,
+        end: Point,
+    },
     Arrow {
         start: Point,
         end: Point,
@@ -103,11 +107,18 @@ pub struct ArrowGeometry {
     pub head: [Point; 3],
 }
 
+/// Length of the segment from `start` to `end`, in source-image pixels.
+pub fn line_length(start: Point, end: Point) -> f32 {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    (dx * dx + dy * dy).sqrt()
+}
+
 /// Geometry for an arrow, or `None` when the drag is too short to be an arrow.
 pub fn arrow_geometry(start: Point, end: Point, stroke_px: f32) -> Option<ArrowGeometry> {
     let dx = end[0] - start[0];
     let dy = end[1] - start[1];
-    let len = (dx * dx + dy * dy).sqrt();
+    let len = line_length(start, end);
     if !len.is_finite() || len < 1.0 {
         return None;
     }

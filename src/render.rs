@@ -20,6 +20,15 @@ pub fn render_annotations(
     let mut pixmap = Pixmap::new(width, height)?;
     for annotation in document.annotations() {
         match &annotation.kind {
+            AnnotationKind::Line { start, end } => {
+                draw_line(
+                    &mut pixmap,
+                    *start,
+                    *end,
+                    annotation.color,
+                    annotation.stroke_px,
+                );
+            }
             AnnotationKind::Arrow { start, end } => {
                 draw_arrow(
                     &mut pixmap,
@@ -55,6 +64,26 @@ pub fn render_annotations(
 
 fn skia_color(color: Rgba) -> Color {
     Color::from_rgba8(color.r, color.g, color.b, color.a)
+}
+
+fn draw_line(pixmap: &mut Pixmap, start: [f32; 2], end: [f32; 2], color: Rgba, stroke_px: f32) {
+    let mut paint = Paint::default();
+    paint.set_color(skia_color(color));
+    paint.anti_alias = true;
+
+    let mut path = PathBuilder::new();
+    path.move_to(start[0], start[1]);
+    path.line_to(end[0], end[1]);
+    let Some(path) = path.finish() else {
+        return;
+    };
+    let stroke = Stroke {
+        width: stroke_px.max(1.0),
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        ..Stroke::default()
+    };
+    pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
 }
 
 fn draw_arrow(pixmap: &mut Pixmap, start: [f32; 2], end: [f32; 2], color: Rgba, stroke_px: f32) {

@@ -15,7 +15,7 @@ use rune::{
 
 use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
-use crate::document::{AnnotationKind, Document, Point, Rgba, arrow_geometry};
+use crate::document::{AnnotationKind, Document, Point, Rgba, arrow_geometry, line_length};
 use crate::export::{self, ExportError};
 use crate::render::render_annotations;
 use crate::source::{LoadError, SourceImage};
@@ -69,6 +69,7 @@ struct Editing {
 }
 
 struct Draft {
+    tool: Tool,
     start: Point,
     end: Point,
 }
@@ -156,6 +157,10 @@ impl Editor {
 
     pub fn tool(&self) -> Tool {
         self.tool
+    }
+
+    pub fn document(&self) -> &Document {
+        &self.document
     }
 
     pub fn set_tool(&mut self, tool: Tool) {
@@ -256,6 +261,24 @@ impl Editor {
         self.rebuild_overlay();
     }
 
+    fn finish_line(&mut self) {
+        let Some(draft) = self.draft.take() else {
+            return;
+        };
+        if line_length(draft.start, draft.end) < 1.0 {
+            return;
+        }
+        self.document.push(
+            AnnotationKind::Line {
+                start: draft.start,
+                end: draft.end,
+            },
+            self.color,
+            self.stroke_px,
+        );
+        self.rebuild_overlay();
+    }
+
     fn rebuild_overlay(&mut self) {
         let pixmap = render_annotations(
             &mut self.text_renderer,
@@ -288,12 +311,14 @@ impl Editor {
     fn on_canvas_drag(&mut self, drag: &Drag) {
         match self.tool {
             Tool::Select => {}
-            Tool::Line | Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {}
-            Tool::Arrow => {
+            Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {}
+            Tool::Line | Tool::Arrow => {
+                let tool = self.tool;
                 let point = self.drag_point(drag);
                 match drag.phase {
                     Phase::Down => {
                         self.draft = Some(Draft {
+                            tool,
                             start: point,
                             end: point,
                         })
@@ -309,6 +334,8 @@ impl Editor {
                         }
                         if drag.cancelled() {
                             self.draft = None;
+                        } else if tool == Tool::Line {
+                            self.finish_line();
                         } else {
                             self.finish_arrow();
                         }
@@ -422,24 +449,39 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
     }
     if let Some(draft) = &editor.draft {
         let scale = editor.canvas_pt[0] / editor.source.width as f32;
-        if scale > 0.0
-            && let Some(geometry) = arrow_geometry(draft.start, draft.end, editor.stroke_px)
-        {
+        if scale > 0.0 {
             let color = rune_color(editor.color);
-            let mut shape = Shape::new().line(
-                geometry.start,
-                geometry.end,
-                (editor.stroke_px * scale).max(0.5),
-                LineCap::Round,
-                color,
-            );
-            shape = shape.fill(geometry.head.to_vec(), color);
-            canvas_el = canvas_el.child(
-                canvas(shape)
-                    .key("draft")
-                    .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-                    .clip_rounded(0.0),
-            );
+            let width = (editor.stroke_px * scale).max(0.5);
+            let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
+            let shape = if draft.tool == Tool::Arrow {
+                arrow_geometry(draft.start, draft.end, editor.stroke_px).map(|geometry| {
+                    let mut shape = Shape::new().line(
+                        to_pt(geometry.start),
+                        to_pt(geometry.end),
+                        width,
+                        LineCap::Round,
+                        color,
+                    );
+                    shape = shape.fill(
+                        geometry.head.iter().map(|p| to_pt(*p)).collect::<Vec<_>>(),
+                        color,
+                    );
+                    shape
+                })
+            } else {
+                let start = to_pt(draft.start);
+                let end = to_pt(draft.end);
+                (line_length(draft.start, draft.end) >= 1.0)
+                    .then(|| Shape::new().line(start, end, width, LineCap::Round, color))
+            };
+            if let Some(shape) = shape {
+                canvas_el = canvas_el.child(
+                    canvas(shape)
+                        .key("draft")
+                        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                        .clip_rounded(0.0),
+                );
+            }
         }
     }
     if let Some(editing) = &editor.editing {
