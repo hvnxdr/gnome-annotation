@@ -576,6 +576,20 @@ impl Editor {
         self.refresh_chrome();
     }
 
+    fn delete_selected(&mut self) -> bool {
+        let Some(id) = self.selected else {
+            return false;
+        };
+        let removed = self.document.remove(id).is_some();
+        self.selected = None;
+        self.gesture = None;
+        self.chrome = None;
+        if removed {
+            self.rebuild_overlay();
+        }
+        removed
+    }
+
     fn finish_gesture(&mut self, cancelled: bool) {
         let Some(gesture) = self.gesture.take() else {
             return;
@@ -675,6 +689,7 @@ pub fn editor_on_key(editor: &mut Editor, event: &KeyEvent, tx: &mut Tx) -> bool
             }
             true
         }
+        Key::Delete | Key::Backspace => editor.delete_selected(),
         Key::Enter => {
             editor.copy_and_close(tx);
             true

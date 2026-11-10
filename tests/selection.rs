@@ -164,6 +164,62 @@ fn dragging_a_selected_rectangle_moves_it() {
 }
 
 #[test]
+fn delete_removes_the_selected_annotation_and_clears_the_selection() {
+    let dir = TempDir::new("delete");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+    assert!(rt.state.selected().is_some(), "the rectangle is selected");
+
+    rt.key(KeyEvent {
+        key: Key::Delete,
+        mods: Mods::default(),
+    });
+    rt.frame(0.0);
+    assert_eq!(rt.state.selected(), None, "delete clears the selection");
+    assert!(
+        rt.state.document().is_empty(),
+        "the selected annotation is gone"
+    );
+    assert!(
+        rt.presented("selection").is_none(),
+        "the chrome is gone with the annotation"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    assert!(
+        !image
+            .enumerate_pixels()
+            .any(|(_, _, pixel)| is_annotation_red(pixel.0)),
+        "the deleted annotation is not in the export"
+    );
+}
+
+#[test]
+fn backspace_also_deletes_the_selected_annotation() {
+    let dir = TempDir::new("delete-backspace");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+    rt.key(KeyEvent {
+        key: Key::Backspace,
+        mods: Mods::default(),
+    });
+    rt.frame(0.0);
+    assert!(rt.state.document().is_empty());
+    assert_eq!(rt.state.selected(), None);
+}
+
+#[test]
 fn selection_chrome_is_visible_and_never_exported() {
     let dir = TempDir::new("chrome");
     let fixture = write_4k_fixture(dir.path());
