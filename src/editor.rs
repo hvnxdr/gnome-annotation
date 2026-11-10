@@ -49,7 +49,11 @@ impl EditorOptions {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
     Select,
+    Line,
     Arrow,
+    Rectangle,
+    Ellipse,
+    Redaction,
     Text,
 }
 
@@ -284,6 +288,7 @@ impl Editor {
     fn on_canvas_drag(&mut self, drag: &Drag) {
         match self.tool {
             Tool::Select => {}
+            Tool::Line | Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {}
             Tool::Arrow => {
                 let point = self.drag_point(drag);
                 match drag.phase {
@@ -333,7 +338,11 @@ pub fn editor_on_key(editor: &mut Editor, event: &KeyEvent, tx: &mut Tx) -> bool
         Key::Text(value) if value.chars().count() == 1 => {
             match value.to_ascii_lowercase().as_str() {
                 "v" => editor.set_tool(Tool::Select),
+                "l" => editor.set_tool(Tool::Line),
                 "a" => editor.set_tool(Tool::Arrow),
+                "r" => editor.set_tool(Tool::Rectangle),
+                "o" => editor.set_tool(Tool::Ellipse),
+                "x" => editor.set_tool(Tool::Redaction),
                 "t" => editor.set_tool(Tool::Text),
                 _ => return false,
             }
