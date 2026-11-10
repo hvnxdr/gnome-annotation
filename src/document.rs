@@ -114,6 +114,10 @@ pub enum AnnotationKind {
         start: Point,
         end: Point,
     },
+    Ellipse {
+        start: Point,
+        end: Point,
+    },
     Text {
         position: Point,
         text: String,

@@ -16,7 +16,8 @@ use rune::{
 use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
 use crate::document::{
-    AnnotationKind, Document, MIN_DRAG_PX, Point, Rect, Rgba, arrow_geometry, line_length,
+    AnnotationKind, Document, MIN_DRAG_PX, Point, Rect, Rgba, arrow_geometry, ellipse_points,
+    line_length,
 };
 use crate::export::{self, ExportError};
 use crate::render::render_annotations;
@@ -278,7 +279,14 @@ impl Editor {
                     end: [rect.x + rect.w, rect.y + rect.h],
                 })
             }
-            Tool::Select | Tool::Ellipse | Tool::Redaction | Tool::Text => None,
+            Tool::Ellipse => {
+                let rect = Rect::normalized(draft.start, draft.end);
+                (!rect.is_too_small()).then_some(AnnotationKind::Ellipse {
+                    start: [rect.x, rect.y],
+                    end: [rect.x + rect.w, rect.y + rect.h],
+                })
+            }
+            Tool::Select | Tool::Redaction | Tool::Text => None,
         };
         let Some(kind) = kind else {
             return;
@@ -447,7 +455,22 @@ fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
                 )
             })
         }
-        Tool::Select | Tool::Ellipse | Tool::Redaction | Tool::Text => None,
+        Tool::Ellipse => {
+            let rect = Rect::normalized(draft.start, draft.end);
+            (!rect.is_too_small()).then(|| {
+                Shape::new().stroke_with(
+                    ellipse_points(rect)
+                        .into_iter()
+                        .map(to_pt)
+                        .collect::<Vec<_>>(),
+                    true,
+                    width,
+                    LineCap::Round,
+                    color,
+                )
+            })
+        }
+        Tool::Select | Tool::Redaction | Tool::Text => None,
     }
 }
 

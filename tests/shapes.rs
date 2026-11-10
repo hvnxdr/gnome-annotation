@@ -187,3 +187,38 @@ fn rectangle_is_drawn_from_any_corner_and_exported() {
         "the rectangle is an outline, not a fill"
     );
 }
+
+#[test]
+fn ellipse_is_drawn_inside_its_bounding_box_and_exported() {
+    let dir = TempDir::new("ellipse");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("o"));
+    rt.frame(0.0);
+    assert!(
+        drag(&mut rt, [600.0, 400.0], [1200.0, 900.0]),
+        "the ellipse is previewed while dragging"
+    );
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(annotations.len(), 1);
+    assert!(
+        matches!(annotations[0].kind, AnnotationKind::Ellipse { .. }),
+        "expected an ellipse, got {:?}",
+        annotations[0].kind
+    );
+
+    let image = export(&sink, &mut rt);
+    let rightmost = image.get_pixel(1200, 650).0;
+    assert!(
+        is_annotation_red(rightmost),
+        "the ellipse touches the right of its box: {rightmost:?}"
+    );
+    let centre = image.get_pixel(900, 650).0;
+    assert_eq!(
+        centre,
+        [36, 36, 36, 255],
+        "the ellipse is an outline, not a fill"
+    );
+}

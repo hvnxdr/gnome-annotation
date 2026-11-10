@@ -5,7 +5,9 @@ use tiny_skia::{
     Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform,
 };
 
-use crate::document::{AnnotationKind, Document, Point, Rect, Rgba, arrow_geometry};
+use crate::document::{
+    AnnotationKind, Document, Point, Rect, Rgba, arrow_geometry, ellipse_points,
+};
 use crate::text::TextRenderer;
 
 pub fn render_annotations(
@@ -42,6 +44,16 @@ pub fn render_annotations(
                 draw_rect(
                     &mut pixmap,
                     Rect::normalized(*start, *end),
+                    annotation.color,
+                    annotation.stroke_px,
+                );
+            }
+            AnnotationKind::Ellipse { start, end } => {
+                let rect = Rect::normalized(*start, *end);
+                draw_polyline(
+                    &mut pixmap,
+                    &ellipse_points(rect),
+                    true,
                     annotation.color,
                     annotation.stroke_px,
                 );
