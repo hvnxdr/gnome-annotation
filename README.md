@@ -29,9 +29,9 @@ writes a desktop entry and a daemon autostart entry, and appends a Print custom 
 Existing custom keybindings keep their order. To start the daemon without logging out,
 either log in again or run the installed binary with `--daemon`.
 
-The binding runs `<binary> --trigger`, not `--capture`. The one-shot `--capture` mode makes
-its own portal call, so it cannot focus the daemon's open editor; the trigger goes through
-the daemon and keeps unsaved annotations on a second Print press.
+The binding runs `<binary> --trigger`. The one-shot `--capture` mode makes its own portal
+call, so it cannot focus the daemon's open editor. The trigger goes through the daemon and
+keeps unsaved annotations on a second Print press.
 
 ```sh
 scripts/install.sh --uninstall
@@ -77,8 +77,8 @@ daemon runs. A trigger is accepted before the portal call, and the client exits 
 the daemon accepts. A second trigger while the editor is open focuses the editor and keeps
 its annotations.
 
-A portal failure or an unreadable capture is logged to stderr and shown as a desktop
-notification. Cancelling GNOME's capture UI opens nothing.
+A portal failure or an unreadable capture makes the daemon log to stderr and show a
+desktop notification. Cancelling GNOME's capture UI opens nothing.
 
 `--capture` is the separate one-shot path: its portal call runs in that process, so it does
 not coordinate with the daemon. It is kept for manual testing.

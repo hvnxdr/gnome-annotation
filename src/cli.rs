@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::capture::{ScreenshotPortal, capture_path};
 
 pub const USAGE: &str = "\
-gnome-annotation — annotate a screenshot, copy it, and close
+gnome-annotation: annotate a screenshot, copy it, and close
 
 Usage:
   gnome-annotation                     Ask the daemon to capture (starts it if needed)

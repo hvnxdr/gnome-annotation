@@ -322,7 +322,7 @@ impl Editor {
     }
 }
 
-/// State that can hand the shared view the editor to render. The one-shot editor is its own
+/// State that can give the shared view an editor to render. The one-shot editor is its own
 /// host; the resident daemon returns `None` while idle and an empty root is drawn.
 pub trait HostsEditor {
     fn editor(&self) -> Option<&Editor>;
