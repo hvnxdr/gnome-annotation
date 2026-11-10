@@ -360,10 +360,16 @@ fn a_fake_portal_capture_opens_the_editor_on_the_returned_file() {
     let fixture = write_4k_fixture(dir.path());
     let fake = Fake(Ok(CaptureOutcome::Captured(fixture.clone())));
     let mut opened = None;
-    let code = run_with(["--capture".into()], &fake, |path| {
-        opened = Some(path);
-        Ok(())
-    });
+    let code = run_with(
+        ["--capture".into()],
+        &fake,
+        |path| {
+            opened = Some(path);
+            Ok(())
+        },
+        || unreachable!("daemon mode is not expected"),
+        || unreachable!("trigger mode is not expected"),
+    );
     assert_eq!(code, 0);
     assert_eq!(opened.as_deref(), Some(fixture.as_path()));
 

@@ -11,5 +11,6 @@ pub mod export;
 pub mod ipc;
 pub mod notify;
 pub mod render;
+pub mod resident;
 pub mod source;
 pub mod text;

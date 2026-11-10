@@ -322,6 +322,23 @@ impl Editor {
     }
 }
 
+/// State that can hand the shared view the editor to render. The one-shot editor is its own
+/// host; the resident daemon returns `None` while idle and an empty root is drawn.
+pub trait HostsEditor {
+    fn editor(&self) -> Option<&Editor>;
+    fn editor_mut(&mut self) -> Option<&mut Editor>;
+}
+
+impl HostsEditor for Editor {
+    fn editor(&self) -> Option<&Editor> {
+        Some(self)
+    }
+
+    fn editor_mut(&mut self) -> Option<&mut Editor> {
+        Some(self)
+    }
+}
+
 pub fn editor_on_key(editor: &mut Editor, event: &KeyEvent, tx: &mut Tx) -> bool {
     if editor.editing.is_some() {
         return false;
@@ -361,7 +378,7 @@ fn rune_color(color: Rgba) -> Color {
     }
 }
 
-fn tool_button(
+fn tool_button<S: HostsEditor + 'static>(
     label: &str,
     key: &'static str,
     shortcut: &str,
@@ -384,11 +401,19 @@ fn tool_button(
         .hover(if active { accent } else { theme.hover })
         .press(if active { accent } else { theme.press })
         .center_y()
-        .on_press(move |editor: &mut Editor| on_press(editor))
+        .on_press(move |state: &mut S| {
+            if let Some(editor) = state.editor_mut() {
+                on_press(editor);
+            }
+        })
         .child(text(label).font(type_::LABEL).color(ink))
 }
 
-pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
+pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
+    let Some(editor) = state.editor() else {
+        // The daemon is idle: no window is open, so the root is empty.
+        return el().key("empty").w_full().h_full();
+    };
     let dark = cx.system_dark();
     let theme = tok::theme(dark);
     let accent = tok::accent(0, dark);
@@ -450,9 +475,23 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
                 .padding(2.0)
                 .color(rune_color(editor.color))
                 .caret(theme.text, theme.text_secondary)
-                .on_edit(|editor: &mut Editor| &mut editor.editing.as_mut().unwrap().edit)
-                .on_submit(|editor: &mut Editor, _tx| editor.commit_text())
-                .on_input_key(|editor: &mut Editor, event, _tx| {
+                .on_edit(|state: &mut S| {
+                    let editor = state.editor_mut().expect("the editor is open");
+                    &mut editor
+                        .editing
+                        .as_mut()
+                        .expect("the text field is being edited")
+                        .edit
+                })
+                .on_submit(|state: &mut S, _tx| {
+                    if let Some(editor) = state.editor_mut() {
+                        editor.commit_text();
+                    }
+                })
+                .on_input_key(|state: &mut S, event, _tx| {
+                    let Some(editor) = state.editor_mut() else {
+                        return false;
+                    };
                     if event.key == Key::Escape {
                         editor.cancel_text();
                         true
@@ -463,10 +502,16 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
         );
     }
     canvas_el = canvas_el
-        .on_drawn_layout(|editor: &mut Editor, [_x, _y, w, h]| {
-            editor.canvas_pt = [w, h];
+        .on_drawn_layout(|state: &mut S, [_x, _y, w, h]| {
+            if let Some(editor) = state.editor_mut() {
+                editor.canvas_pt = [w, h];
+            }
         })
-        .on_drag(|editor: &mut Editor, drag, _tx| editor.on_canvas_drag(drag));
+        .on_drag(|state: &mut S, drag, _tx| {
+            if let Some(editor) = state.editor_mut() {
+                editor.on_canvas_drag(drag);
+            }
+        });
 
     let stage = col()
         .key("stage")
@@ -488,7 +533,7 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
         .center_y()
         .fill(theme.card)
         .border(1.0, theme.card_border)
-        .child(tool_button(
+        .child(tool_button::<S>(
             "Select",
             "tool-select",
             "V",
@@ -497,7 +542,7 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
             accent,
             |e| e.set_tool(Tool::Select),
         ))
-        .child(tool_button(
+        .child(tool_button::<S>(
             "Arrow",
             "tool-arrow",
             "A",
@@ -506,7 +551,7 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
             accent,
             |e| e.set_tool(Tool::Arrow),
         ))
-        .child(tool_button(
+        .child(tool_button::<S>(
             "Text",
             "tool-text",
             "T",
@@ -543,7 +588,10 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
             .hover(accent)
             .press(accent)
             .center_y()
-            .on_press_tx(|editor: &mut Editor, tx: &mut Tx| {
+            .on_press_tx(|state: &mut S, tx: &mut Tx| {
+                let Some(editor) = state.editor_mut() else {
+                    return;
+                };
                 editor.commit_text();
                 editor.copy_and_close(tx);
             })

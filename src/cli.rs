@@ -1,5 +1,5 @@
-//! Command line modes. `--capture` is the one-shot capture flow; the resident daemon is
-//! HVN-30.
+//! Command line modes. No arguments asks the resident daemon for a capture; `--daemon` is the
+//! resident daemon itself; `--capture` is the one-shot portal flow for manual testing.
 
 use std::path::PathBuf;
 
@@ -9,9 +9,14 @@ pub const USAGE: &str = "\
 gnome-annotation — annotate a screenshot, copy it, and close
 
 Usage:
-  gnome-annotation --editor <path.png>   Open the editor on an image
-  gnome-annotation --capture             Capture with GNOME's screenshot UI, then edit
-  gnome-annotation --help                Show this help
+  gnome-annotation                     Ask the daemon to capture (starts it if needed)
+  gnome-annotation --trigger           Same as no arguments
+  gnome-annotation --daemon            Run the resident daemon (started at login)
+  gnome-annotation --editor <path.png> Open the editor on an image
+  gnome-annotation --capture           One-shot capture with GNOME's UI, then edit
+  gnome-annotation --help              Show this help
+
+The installer binds Print to the trigger and adds the daemon to autostart.
 
 In the editor:
   V  select tool
@@ -28,6 +33,8 @@ pub enum CliCommand {
     Help,
     Editor(PathBuf),
     Capture,
+    Daemon,
+    Trigger,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -43,9 +50,11 @@ impl std::error::Error for CliError {}
 
 pub fn parse(args: &[String]) -> Result<CliCommand, CliError> {
     match args {
-        [] => Ok(CliCommand::Help),
+        [] => Ok(CliCommand::Trigger),
         [flag] if flag == "--help" || flag == "-h" => Ok(CliCommand::Help),
         [flag] if flag == "--capture" => Ok(CliCommand::Capture),
+        [flag] if flag == "--daemon" => Ok(CliCommand::Daemon),
+        [flag] if flag == "--trigger" => Ok(CliCommand::Trigger),
         [flag, path] if flag == "--editor" => {
             if path.is_empty() {
                 Err(CliError("--editor needs an image path".into()))
@@ -61,11 +70,14 @@ pub fn parse(args: &[String]) -> Result<CliCommand, CliError> {
     }
 }
 
-/// Run one command. `launch` opens the editor and blocks until it closes.
+/// Run one command. `launch` opens the one-shot editor and blocks until it closes; `daemon`
+/// and `trigger` start the resident side or ask it for a capture.
 pub fn run_with(
     args: impl IntoIterator<Item = String>,
     portal: &dyn ScreenshotPortal,
     launch: impl FnOnce(PathBuf) -> Result<(), String>,
+    daemon: impl FnOnce() -> Result<(), String>,
+    trigger: impl FnOnce() -> Result<(), String>,
 ) -> i32 {
     let args: Vec<String> = args.into_iter().collect();
     match parse(&args) {
@@ -91,6 +103,20 @@ pub fn run_with(
             Ok(None) => 0,
             Err(error) => {
                 eprintln!("gnome-annotation: capture failed: {error}");
+                1
+            }
+        },
+        Ok(CliCommand::Daemon) => match daemon() {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("gnome-annotation: {error}");
+                1
+            }
+        },
+        Ok(CliCommand::Trigger) => match trigger() {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("gnome-annotation: {error}");
                 1
             }
         },

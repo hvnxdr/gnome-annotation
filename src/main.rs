@@ -1,4 +1,5 @@
-//! gnome-annotation binary. One editor window; `--capture` is the one-shot portal flow.
+//! gnome-annotation binary. No arguments triggers the resident daemon; `--daemon` is the
+//! daemon itself; `--capture` is the one-shot portal flow; `--editor` opens an explicit image.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,6 +13,7 @@ use gnome_annotation::editor::{
     APP_ID, APP_TITLE, DEFAULT_WINDOW, Editor, EditorOptions, MIN_WINDOW, editor_on_key,
     editor_view,
 };
+use gnome_annotation::resident;
 use rune::AppSpec;
 
 fn main() {
@@ -19,6 +21,8 @@ fn main() {
         std::env::args().skip(1),
         &PortalScreenshot,
         launch_editor,
+        resident::run_daemon,
+        resident::run_trigger,
     ));
 }
 
