@@ -267,6 +267,54 @@ fn redaction_is_opaque_black_with_no_outline() {
     );
 }
 
+#[test]
+fn drags_past_the_image_edge_are_cropped_to_the_capture() {
+    let dir = TempDir::new("clipping");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("r"));
+    rt.frame(0.0);
+    assert!(
+        drag(&mut rt, [3000.0, 1000.0], [4200.0, 2400.0]),
+        "the draft is shown before it is cropped"
+    );
+
+    rt.key(key_text("l"));
+    rt.frame(0.0);
+    assert!(drag(&mut rt, [3000.0, 500.0], [4200.0, 500.0]));
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(annotations.len(), 2);
+    let AnnotationKind::Rectangle { start, end } = annotations[0].kind else {
+        panic!("expected a rectangle, got {:?}", annotations[0].kind);
+    };
+    assert_near(start, [3000.0, 1000.0]);
+    assert_near(end, [3840.0, 2160.0]);
+    let AnnotationKind::Line { start, end } = annotations[1].kind else {
+        panic!("expected a line, got {:?}", annotations[1].kind);
+    };
+    assert_near(start, [3000.0, 500.0]);
+    assert_near(end, [3840.0, 500.0]);
+
+    let image = export(&sink, &mut rt);
+    let right_edge = image.get_pixel(3835, 1500).0;
+    assert!(
+        is_annotation_red(right_edge),
+        "the rectangle reaches the image edge: {right_edge:?}"
+    );
+    let line_end = image.get_pixel(3830, 500).0;
+    assert!(
+        is_annotation_red(line_end),
+        "the line is cropped at the image edge: {line_end:?}"
+    );
+    assert_eq!(
+        image.get_pixel(10, 1500).0,
+        [36, 36, 36, 255],
+        "nothing wraps to the opposite edge"
+    );
+}
+
 fn near(px: [u8; 4], color: Rgba) -> bool {
     px[3] == 255
         && (i32::from(px[0]) - i32::from(color.r)).abs() <= 4

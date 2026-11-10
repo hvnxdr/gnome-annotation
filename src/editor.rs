@@ -17,7 +17,7 @@ use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
 use crate::document::{
     AnnotationKind, Document, MIN_DRAG_PX, PALETTE, Point, Rect, Rgba, STROKE_WIDTHS_PT,
-    arrow_geometry, ellipse_points, line_length,
+    arrow_geometry, crop_segment, ellipse_points, line_length,
 };
 use crate::export::{self, ExportError};
 use crate::render::render_annotations;
@@ -281,40 +281,31 @@ impl Editor {
             return;
         };
         let stroke_px = self.stroke_px();
+        let bounds = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: self.source.width as f32,
+            h: self.source.height as f32,
+        };
+        let cropped_rect = Rect::normalized(draft.start, draft.end).crop(bounds);
+        let rect_kind = |make: fn(Point, Point) -> AnnotationKind| {
+            (!cropped_rect.is_too_small()).then_some(make(
+                [cropped_rect.x, cropped_rect.y],
+                [
+                    cropped_rect.x + cropped_rect.w,
+                    cropped_rect.y + cropped_rect.h,
+                ],
+            ))
+        };
         let kind = match draft.tool {
-            Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX).then_some(
-                AnnotationKind::Line {
-                    start: draft.start,
-                    end: draft.end,
-                },
-            ),
-            Tool::Arrow => {
-                arrow_geometry(draft.start, draft.end, stroke_px).map(|_| AnnotationKind::Arrow {
-                    start: draft.start,
-                    end: draft.end,
-                })
-            }
-            Tool::Rectangle => {
-                let rect = Rect::normalized(draft.start, draft.end);
-                (!rect.is_too_small()).then_some(AnnotationKind::Rectangle {
-                    start: [rect.x, rect.y],
-                    end: [rect.x + rect.w, rect.y + rect.h],
-                })
-            }
-            Tool::Ellipse => {
-                let rect = Rect::normalized(draft.start, draft.end);
-                (!rect.is_too_small()).then_some(AnnotationKind::Ellipse {
-                    start: [rect.x, rect.y],
-                    end: [rect.x + rect.w, rect.y + rect.h],
-                })
-            }
-            Tool::Redaction => {
-                let rect = Rect::normalized(draft.start, draft.end);
-                (!rect.is_too_small()).then_some(AnnotationKind::Redaction {
-                    start: [rect.x, rect.y],
-                    end: [rect.x + rect.w, rect.y + rect.h],
-                })
-            }
+            Tool::Line => crop_segment(draft.start, draft.end, bounds)
+                .map(|(start, end)| AnnotationKind::Line { start, end }),
+            Tool::Arrow => crop_segment(draft.start, draft.end, bounds).and_then(|(start, end)| {
+                arrow_geometry(start, end, stroke_px).map(|_| AnnotationKind::Arrow { start, end })
+            }),
+            Tool::Rectangle => rect_kind(|start, end| AnnotationKind::Rectangle { start, end }),
+            Tool::Ellipse => rect_kind(|start, end| AnnotationKind::Ellipse { start, end }),
+            Tool::Redaction => rect_kind(|start, end| AnnotationKind::Redaction { start, end }),
             Tool::Select | Tool::Text => None,
         };
         let Some(kind) = kind else {

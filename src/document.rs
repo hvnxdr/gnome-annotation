@@ -38,6 +38,70 @@ impl Rect {
     pub fn is_too_small(self) -> bool {
         self.w < MIN_DRAG_PX || self.h < MIN_DRAG_PX
     }
+
+    /// The part of this rectangle inside `bounds`, with the same origin when they overlap.
+    pub fn crop(self, bounds: Rect) -> Rect {
+        let x0 = self.x.max(bounds.x);
+        let y0 = self.y.max(bounds.y);
+        let x1 = (self.x + self.w).min(bounds.x + bounds.w);
+        let y1 = (self.y + self.h).min(bounds.y + bounds.h);
+        if x1 <= x0 || y1 <= y0 {
+            Rect {
+                x: x0,
+                y: y0,
+                w: 0.0,
+                h: 0.0,
+            }
+        } else {
+            Rect {
+                x: x0,
+                y: y0,
+                w: x1 - x0,
+                h: y1 - y0,
+            }
+        }
+    }
+}
+
+/// Crop a segment to `bounds`, keeping its direction. `None` when no part is inside or the
+/// visible part is too short to draw.
+pub fn crop_segment(start: Point, end: Point, bounds: Rect) -> Option<(Point, Point)> {
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let edges = [
+        (-dx, start[0] - bounds.x),
+        (dx, bounds.x + bounds.w - start[0]),
+        (-dy, start[1] - bounds.y),
+        (dy, bounds.y + bounds.h - start[1]),
+    ];
+    for (p, q) in edges {
+        if p == 0.0 {
+            if q < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let r = q / p;
+        if p < 0.0 {
+            if r > t1 {
+                return None;
+            }
+            if r > t0 {
+                t0 = r;
+            }
+        } else {
+            if r < t0 {
+                return None;
+            }
+            if r < t1 {
+                t1 = r;
+            }
+        }
+    }
+    let clipped_start = [start[0] + t0 * dx, start[1] + t0 * dy];
+    let clipped_end = [start[0] + t1 * dx, start[1] + t1 * dy];
+    (line_length(clipped_start, clipped_end) >= MIN_DRAG_PX).then_some((clipped_start, clipped_end))
 }
 
 /// The ellipse inscribed in `rect`, as a closed ring of points sampled from the true curve.
