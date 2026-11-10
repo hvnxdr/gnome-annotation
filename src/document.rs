@@ -294,9 +294,11 @@ impl Annotation {
 impl AnnotationKind {
     /// Whether `point` lands on this kind. Lines and arrows are hit by distance to the
     /// segment so a thin mark is easy to grab; boxes are hit by their interior.
-    pub fn hit_test(&self, point: Point, _tolerance_px: f32) -> bool {
+    pub fn hit_test(&self, point: Point, tolerance_px: f32) -> bool {
         match self {
-            Self::Line { .. } | Self::Arrow { .. } => false,
+            Self::Line { start, end } | Self::Arrow { start, end } => {
+                distance_to_segment(point, *start, *end) <= tolerance_px
+            }
             Self::Rectangle { start, end } | Self::Redaction { start, end } => {
                 point_in_rect(point, Rect::normalized(*start, *end))
             }
@@ -337,6 +339,19 @@ pub fn line_length(start: Point, end: Point) -> f32 {
     let dx = end[0] - start[0];
     let dy = end[1] - start[1];
     (dx * dx + dy * dy).sqrt()
+}
+
+/// Distance from `point` to the segment from `start` to `end`, in source-image pixels.
+pub fn distance_to_segment(point: Point, start: Point, end: Point) -> f32 {
+    let dx = end[0] - start[0];
+    let dy = end[1] - start[1];
+    let length_squared = dx * dx + dy * dy;
+    if length_squared <= f32::EPSILON {
+        return line_length(point, start);
+    }
+    let t = (((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / length_squared)
+        .clamp(0.0, 1.0);
+    line_length(point, [start[0] + t * dx, start[1] + t * dy])
 }
 
 /// Geometry for an arrow, or `None` when the drag is too short to be an arrow.

@@ -75,6 +75,12 @@ fn click(rt: &mut Runtime<Editor>, at: [f32; 2]) {
     rt.frame(0.0);
 }
 
+fn draw_line(rt: &mut Runtime<Editor>, from: [f32; 2], to: [f32; 2]) {
+    rt.key(key_text("l"));
+    rt.frame(0.0);
+    drag(rt, from, to);
+}
+
 fn draw_rectangle(rt: &mut Runtime<Editor>, from: [f32; 2], to: [f32; 2]) {
     rt.key(key_text("r"));
     rt.frame(0.0);
@@ -90,6 +96,61 @@ fn select_topmost_shapes(rt: &mut Runtime<Editor>) {
 }
 
 #[test]
+fn a_diagonal_line_is_hit_near_the_segment_not_at_its_bounding_box_corner() {
+    let dir = TempDir::new("line-hit");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_line(&mut rt, [600.0, 400.0], [1800.0, 900.0]);
+    let id = rt.state.document().annotations()[0].id;
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+
+    // The segment is at y=650 where x=1200; (1200, 660) sits 10 px below the midpoint.
+    click(&mut rt, [1200.0, 660.0]);
+    assert_eq!(
+        rt.state.selected(),
+        Some(id),
+        "a click near the segment selects the line"
+    );
+
+    click(&mut rt, [1750.0, 450.0]);
+    assert_eq!(
+        rt.state.selected(),
+        None,
+        "a bounding-box corner far from the segment does not select the line"
+    );
+}
+
+#[test]
+fn an_arrow_is_hit_near_its_shaft() {
+    let dir = TempDir::new("arrow-hit");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("a"));
+    rt.frame(0.0);
+    drag(&mut rt, [600.0, 400.0], [1800.0, 900.0]);
+    let id = rt.state.document().annotations()[0].id;
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+
+    click(&mut rt, [1200.0, 630.0]);
+    assert_eq!(
+        rt.state.selected(),
+        Some(id),
+        "a click near the shaft selects the arrow"
+    );
+
+    click(&mut rt, [650.0, 850.0]);
+    assert_eq!(
+        rt.state.selected(),
+        None,
+        "a corner of the arrow's box misses"
+    );
+}
+
+#[test]
 fn clicking_empty_canvas_clears_the_selection() {
     let dir = TempDir::new("select-clear");
     let fixture = write_4k_fixture(dir.path());
@@ -100,7 +161,11 @@ fn clicking_empty_canvas_clears_the_selection() {
     assert!(rt.state.selected().is_some(), "a rectangle is selected");
 
     click(&mut rt, [3000.0, 1800.0]);
-    assert_eq!(rt.state.selected(), None, "empty canvas clears the selection");
+    assert_eq!(
+        rt.state.selected(),
+        None,
+        "empty canvas clears the selection"
+    );
 }
 
 #[test]

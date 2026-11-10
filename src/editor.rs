@@ -175,12 +175,15 @@ impl Editor {
 
     /// The topmost annotation under `point`, in source-image pixels.
     fn hit_test(&self, point: Point) -> Option<u64> {
-        let tolerance_px = 6.0 / self.fit_scale().max(f32::EPSILON);
+        let six_pt_px = 6.0 / self.fit_scale().max(f32::EPSILON);
         self.document
             .annotations()
             .iter()
             .rev()
-            .find(|annotation| annotation.hit_test(point, tolerance_px))
+            .find(|annotation| {
+                let tolerance_px = (annotation.stroke_px / 2.0 + six_pt_px).max(six_pt_px);
+                annotation.hit_test(point, tolerance_px)
+            })
             .map(|annotation| annotation.id)
     }
 
