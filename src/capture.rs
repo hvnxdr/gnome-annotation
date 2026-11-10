@@ -91,11 +91,7 @@ async fn capture_interactive() -> Result<CaptureOutcome, CaptureError> {
             .receive_signal("Response")
             .await
             .map_err(portal_error)?;
-        let options: HashMap<&str, Variant> = HashMap::from([
-            ("handle_token", Variant::from(token.as_str())),
-            ("interactive", Variant::from(true)),
-            ("modal", Variant::from(true)),
-        ]);
+        let options = capture_options(&token);
         let handle: OwnedObjectPath = portal
             .call("Screenshot", &("", options))
             .await
@@ -134,6 +130,16 @@ async fn capture_interactive() -> Result<CaptureOutcome, CaptureError> {
         .and_then(|value| value.try_clone().ok())
         .and_then(|value| String::try_from(value).ok());
     response_outcome(status, uri.as_deref())
+}
+
+/// The portal options. Interactive offers GNOME's selection, window, and screen UI; modal false
+/// keeps the dialog from blocking the parent, as the parent spec requires.
+fn capture_options(token: &str) -> HashMap<&str, Variant<'_>> {
+    HashMap::from([
+        ("handle_token", Variant::from(token)),
+        ("interactive", Variant::from(true)),
+        ("modal", Variant::from(false)),
+    ])
 }
 
 fn portal_error(error: zbus::Error) -> CaptureError {
@@ -210,6 +216,25 @@ static TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_portal_request_is_interactive_and_not_modal() {
+        let options = capture_options("gnome_annotation_1");
+        assert_eq!(
+            options.get("interactive"),
+            Some(&Variant::from(true)),
+            "GNOME's selection, window, and screen UI stays available"
+        );
+        assert_eq!(
+            options.get("modal"),
+            Some(&Variant::from(false)),
+            "the parent spec asks for a non-modal capture"
+        );
+        assert_eq!(
+            options.get("handle_token"),
+            Some(&Variant::from("gnome_annotation_1"))
+        );
+    }
 
     #[test]
     fn response_zero_maps_the_uri_to_a_path() {
