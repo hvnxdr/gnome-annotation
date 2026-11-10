@@ -2,6 +2,60 @@
 
 pub type Point = [f32; 2];
 
+/// The smallest drag, in source-image pixels, that produces an annotation.
+pub const MIN_DRAG_PX: f32 = 1.0;
+
+/// An axis-aligned rectangle in source-image pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+impl Rect {
+    /// The rectangle spanned by two drag corners, in any direction.
+    pub fn normalized(start: Point, end: Point) -> Self {
+        Self {
+            x: start[0].min(end[0]),
+            y: start[1].min(end[1]),
+            w: (end[0] - start[0]).abs(),
+            h: (end[1] - start[1]).abs(),
+        }
+    }
+
+    /// Corners clockwise from the top left.
+    pub fn corners(self) -> [Point; 4] {
+        [
+            [self.x, self.y],
+            [self.x + self.w, self.y],
+            [self.x + self.w, self.y + self.h],
+            [self.x, self.y + self.h],
+        ]
+    }
+
+    pub fn is_too_small(self) -> bool {
+        self.w < MIN_DRAG_PX || self.h < MIN_DRAG_PX
+    }
+}
+
+/// The ellipse inscribed in `rect`, as a closed ring of points sampled from the true curve.
+/// Both the preview and the exporter stroke the same points.
+pub fn ellipse_points(rect: Rect) -> Vec<Point> {
+    const SEGMENTS: usize = 96;
+    let cx = rect.x + rect.w / 2.0;
+    let cy = rect.y + rect.h / 2.0;
+    let rx = rect.w / 2.0;
+    let ry = rect.h / 2.0;
+    (0..SEGMENTS)
+        .map(|i| {
+            let angle = std::f32::consts::TAU * i as f32 / SEGMENTS as f32;
+            [cx + rx * angle.cos(), cy + ry * angle.sin()]
+        })
+        .collect()
+}
+
 /// Straight-alpha sRGB colour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rgba {
@@ -53,6 +107,10 @@ pub enum AnnotationKind {
         end: Point,
     },
     Arrow {
+        start: Point,
+        end: Point,
+    },
+    Rectangle {
         start: Point,
         end: Point,
     },

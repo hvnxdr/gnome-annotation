@@ -145,3 +145,45 @@ fn line_is_drawn_by_dragging_and_exported() {
         "the line paints its midpoint: {midpoint:?}"
     );
 }
+
+fn assert_near(actual: [f32; 2], expected: [f32; 2]) {
+    assert!(
+        (actual[0] - expected[0]).abs() < 1.0 && (actual[1] - expected[1]).abs() < 1.0,
+        "expected {expected:?}, got {actual:?}"
+    );
+}
+
+#[test]
+fn rectangle_is_drawn_from_any_corner_and_exported() {
+    let dir = TempDir::new("rectangle");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("r"));
+    rt.frame(0.0);
+    assert!(
+        drag(&mut rt, [1200.0, 900.0], [600.0, 400.0]),
+        "the rectangle is previewed while dragging"
+    );
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(annotations.len(), 1);
+    let AnnotationKind::Rectangle { start, end } = annotations[0].kind else {
+        panic!("expected a rectangle, got {:?}", annotations[0].kind);
+    };
+    assert_near(start, [600.0, 400.0]);
+    assert_near(end, [1200.0, 900.0]);
+
+    let image = export(&sink, &mut rt);
+    let top_edge = image.get_pixel(900, 400).0;
+    assert!(
+        is_annotation_red(top_edge),
+        "the rectangle outlines its top edge: {top_edge:?}"
+    );
+    let interior = image.get_pixel(900, 650).0;
+    assert_eq!(
+        interior,
+        [36, 36, 36, 255],
+        "the rectangle is an outline, not a fill"
+    );
+}

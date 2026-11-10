@@ -15,7 +15,9 @@ use rune::{
 
 use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
-use crate::document::{AnnotationKind, Document, Point, Rgba, arrow_geometry, line_length};
+use crate::document::{
+    AnnotationKind, Document, MIN_DRAG_PX, Point, Rect, Rgba, arrow_geometry, line_length,
+};
 use crate::export::{self, ExportError};
 use crate::render::render_annotations;
 use crate::source::{LoadError, SourceImage};
@@ -163,6 +165,15 @@ impl Editor {
         &self.document
     }
 
+    /// Points per source-image pixel at the current window size.
+    pub fn fit_scale(&self) -> f32 {
+        if self.canvas_pt[0] > 0.0 {
+            self.canvas_pt[0] / self.source.width as f32
+        } else {
+            1.0
+        }
+    }
+
     pub fn set_tool(&mut self, tool: Tool) {
         if self.editing.is_some() {
             self.commit_text();
@@ -243,39 +254,36 @@ impl Editor {
         self.editing = None;
     }
 
-    fn finish_arrow(&mut self) {
+    fn finish_draft(&mut self) {
         let Some(draft) = self.draft.take() else {
             return;
         };
-        if arrow_geometry(draft.start, draft.end, self.stroke_px).is_none() {
-            return;
-        }
-        self.document.push(
-            AnnotationKind::Arrow {
-                start: draft.start,
-                end: draft.end,
-            },
-            self.color,
-            self.stroke_px,
-        );
-        self.rebuild_overlay();
-    }
-
-    fn finish_line(&mut self) {
-        let Some(draft) = self.draft.take() else {
+        let kind = match draft.tool {
+            Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX).then_some(
+                AnnotationKind::Line {
+                    start: draft.start,
+                    end: draft.end,
+                },
+            ),
+            Tool::Arrow => arrow_geometry(draft.start, draft.end, self.stroke_px).map(|_| {
+                AnnotationKind::Arrow {
+                    start: draft.start,
+                    end: draft.end,
+                }
+            }),
+            Tool::Rectangle => {
+                let rect = Rect::normalized(draft.start, draft.end);
+                (!rect.is_too_small()).then_some(AnnotationKind::Rectangle {
+                    start: [rect.x, rect.y],
+                    end: [rect.x + rect.w, rect.y + rect.h],
+                })
+            }
+            Tool::Select | Tool::Ellipse | Tool::Redaction | Tool::Text => None,
+        };
+        let Some(kind) = kind else {
             return;
         };
-        if line_length(draft.start, draft.end) < 1.0 {
-            return;
-        }
-        self.document.push(
-            AnnotationKind::Line {
-                start: draft.start,
-                end: draft.end,
-            },
-            self.color,
-            self.stroke_px,
-        );
+        self.document.push(kind, self.color, self.stroke_px);
         self.rebuild_overlay();
     }
 
@@ -311,8 +319,7 @@ impl Editor {
     fn on_canvas_drag(&mut self, drag: &Drag) {
         match self.tool {
             Tool::Select => {}
-            Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {}
-            Tool::Line | Tool::Arrow => {
+            Tool::Line | Tool::Arrow | Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {
                 let tool = self.tool;
                 let point = self.drag_point(drag);
                 match drag.phase {
@@ -334,10 +341,8 @@ impl Editor {
                         }
                         if drag.cancelled() {
                             self.draft = None;
-                        } else if tool == Tool::Line {
-                            self.finish_line();
                         } else {
-                            self.finish_arrow();
+                            self.finish_draft();
                         }
                     }
                 }
@@ -397,6 +402,55 @@ fn rune_color(color: Rgba) -> Color {
     }
 }
 
+/// The in-flight draft in screen points, built from the same geometry the exporter uses.
+fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
+    let scale = editor.fit_scale();
+    if scale <= 0.0 {
+        return None;
+    }
+    let color = rune_color(editor.color);
+    let width = (editor.stroke_px * scale).max(0.5);
+    let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
+    match draft.tool {
+        Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX).then(|| {
+            Shape::new().line(
+                to_pt(draft.start),
+                to_pt(draft.end),
+                width,
+                LineCap::Round,
+                color,
+            )
+        }),
+        Tool::Arrow => arrow_geometry(draft.start, draft.end, editor.stroke_px).map(|geometry| {
+            let mut shape = Shape::new().line(
+                to_pt(geometry.start),
+                to_pt(geometry.end),
+                width,
+                LineCap::Round,
+                color,
+            );
+            shape = shape.fill(
+                geometry.head.iter().map(|p| to_pt(*p)).collect::<Vec<_>>(),
+                color,
+            );
+            shape
+        }),
+        Tool::Rectangle => {
+            let rect = Rect::normalized(draft.start, draft.end);
+            (!rect.is_too_small()).then(|| {
+                Shape::new().stroke_with(
+                    rect.corners().map(to_pt).to_vec(),
+                    true,
+                    width,
+                    LineCap::Round,
+                    color,
+                )
+            })
+        }
+        Tool::Select | Tool::Ellipse | Tool::Redaction | Tool::Text => None,
+    }
+}
+
 fn tool_button(
     label: &str,
     key: &'static str,
@@ -447,42 +501,15 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
                 .pixels(image.pixels()),
         );
     }
-    if let Some(draft) = &editor.draft {
-        let scale = editor.canvas_pt[0] / editor.source.width as f32;
-        if scale > 0.0 {
-            let color = rune_color(editor.color);
-            let width = (editor.stroke_px * scale).max(0.5);
-            let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
-            let shape = if draft.tool == Tool::Arrow {
-                arrow_geometry(draft.start, draft.end, editor.stroke_px).map(|geometry| {
-                    let mut shape = Shape::new().line(
-                        to_pt(geometry.start),
-                        to_pt(geometry.end),
-                        width,
-                        LineCap::Round,
-                        color,
-                    );
-                    shape = shape.fill(
-                        geometry.head.iter().map(|p| to_pt(*p)).collect::<Vec<_>>(),
-                        color,
-                    );
-                    shape
-                })
-            } else {
-                let start = to_pt(draft.start);
-                let end = to_pt(draft.end);
-                (line_length(draft.start, draft.end) >= 1.0)
-                    .then(|| Shape::new().line(start, end, width, LineCap::Round, color))
-            };
-            if let Some(shape) = shape {
-                canvas_el = canvas_el.child(
-                    canvas(shape)
-                        .key("draft")
-                        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
-                        .clip_rounded(0.0),
-                );
-            }
-        }
+    if let Some(draft) = &editor.draft
+        && let Some(shape) = draft_shape(editor, draft)
+    {
+        canvas_el = canvas_el.child(
+            canvas(shape)
+                .key("draft")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .clip_rounded(0.0),
+        );
     }
     if let Some(editing) = &editor.editing {
         let scale = if editor.canvas_pt[0] > 0.0 {

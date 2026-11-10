@@ -5,7 +5,7 @@ use tiny_skia::{
     Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform,
 };
 
-use crate::document::{AnnotationKind, Document, Rgba, arrow_geometry};
+use crate::document::{AnnotationKind, Document, Point, Rect, Rgba, arrow_geometry};
 use crate::text::TextRenderer;
 
 pub fn render_annotations(
@@ -34,6 +34,14 @@ pub fn render_annotations(
                     &mut pixmap,
                     *start,
                     *end,
+                    annotation.color,
+                    annotation.stroke_px,
+                );
+            }
+            AnnotationKind::Rectangle { start, end } => {
+                draw_rect(
+                    &mut pixmap,
+                    Rect::normalized(*start, *end),
                     annotation.color,
                     annotation.stroke_px,
                 );
@@ -67,13 +75,29 @@ fn skia_color(color: Rgba) -> Color {
 }
 
 fn draw_line(pixmap: &mut Pixmap, start: [f32; 2], end: [f32; 2], color: Rgba, stroke_px: f32) {
+    draw_polyline(pixmap, &[start, end], false, color, stroke_px);
+}
+
+fn draw_rect(pixmap: &mut Pixmap, rect: Rect, color: Rgba, stroke_px: f32) {
+    draw_polyline(pixmap, &rect.corners(), true, color, stroke_px);
+}
+
+fn draw_polyline(pixmap: &mut Pixmap, points: &[Point], closed: bool, color: Rgba, stroke_px: f32) {
+    let Some((first, rest)) = points.split_first() else {
+        return;
+    };
     let mut paint = Paint::default();
     paint.set_color(skia_color(color));
     paint.anti_alias = true;
 
     let mut path = PathBuilder::new();
-    path.move_to(start[0], start[1]);
-    path.line_to(end[0], end[1]);
+    path.move_to(first[0], first[1]);
+    for point in rest {
+        path.line_to(point[0], point[1]);
+    }
+    if closed {
+        path.close();
+    }
     let Some(path) = path.finish() else {
         return;
     };
