@@ -84,6 +84,13 @@ struct LiveText {
     size: [f32; 2],
 }
 
+/// What a selection gesture changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GestureMode {
+    Move,
+    Resize { handle: usize },
+}
+
 /// One selection adjustment in flight. The document holds the annotation at its old geometry
 /// until the gesture commits; `live` is what the canvas previews.
 struct Gesture {
@@ -91,6 +98,7 @@ struct Gesture {
     origin: Annotation,
     live: Annotation,
     anchor: Point,
+    mode: GestureMode,
     text: Option<LiveText>,
 }
 
@@ -424,7 +432,23 @@ impl Editor {
         })
     }
 
+    fn handle_at(&self, annotation: &Annotation, point: Point) -> Option<usize> {
+        let tolerance_px = 6.0 / self.fit_scale().max(f32::EPSILON);
+        annotation
+            .kind
+            .handles()
+            .iter()
+            .position(|handle| line_length(*handle, point) <= tolerance_px)
+    }
+
     fn begin_select(&mut self, point: Point) {
+        let selected = self.selected.and_then(|id| self.document.get(id)).cloned();
+        if let Some(annotation) = selected
+            && let Some(handle) = self.handle_at(&annotation, point)
+        {
+            self.begin_gesture(annotation, GestureMode::Resize { handle }, point);
+            return;
+        }
         let Some(id) = self.hit_test(point) else {
             self.selected = None;
             self.gesture = None;
@@ -434,17 +458,27 @@ impl Editor {
         let Some(annotation) = self.document.get(id).cloned() else {
             return;
         };
-        let text = match &annotation.kind {
-            AnnotationKind::Text { text, size_px, .. } => {
-                self.live_text(text, *size_px, annotation.color)
+        self.begin_gesture(annotation, GestureMode::Move, point);
+    }
+
+    fn begin_gesture(&mut self, annotation: Annotation, mode: GestureMode, anchor: Point) {
+        let text = if mode == GestureMode::Move {
+            match &annotation.kind {
+                AnnotationKind::Text { text, size_px, .. } => {
+                    self.live_text(text, *size_px, annotation.color)
+                }
+                _ => None,
             }
-            _ => None,
+        } else {
+            None
         };
+        let id = annotation.id;
         self.gesture = Some(Gesture {
             id,
             origin: annotation.clone(),
             live: annotation,
-            anchor: point,
+            anchor,
+            mode,
             text,
         });
         self.rebuild_overlay_excluding(Some(id));
@@ -454,9 +488,17 @@ impl Editor {
         let Some(gesture) = &mut self.gesture else {
             return;
         };
-        let dx = point[0] - gesture.anchor[0];
-        let dy = point[1] - gesture.anchor[1];
-        gesture.live.kind = gesture.origin.kind.translated(dx, dy);
+        let next = match gesture.mode {
+            GestureMode::Move => {
+                let dx = point[0] - gesture.anchor[0];
+                let dy = point[1] - gesture.anchor[1];
+                Some(gesture.origin.kind.translated(dx, dy))
+            }
+            GestureMode::Resize { handle } => gesture.origin.kind.with_handle(handle, point),
+        };
+        if let Some(kind) = next {
+            gesture.live.kind = kind;
+        }
     }
 
     fn finish_gesture(&mut self, cancelled: bool) {

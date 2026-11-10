@@ -164,6 +164,199 @@ fn dragging_a_selected_rectangle_moves_it() {
 }
 
 #[test]
+fn dragging_a_corner_handle_resizes_a_rectangle() {
+    let dir = TempDir::new("resize-rect");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+    drag(&mut rt, [1200.0, 900.0], [1500.0, 1100.0]);
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Rectangle { start, end } = annotation.kind else {
+        panic!("expected a rectangle, got {:?}", annotation.kind);
+    };
+    assert!(
+        (start[0] - 600.0).abs() < 1.0 && (start[1] - 400.0).abs() < 1.0,
+        "the opposite corner stays fixed: {start:?}"
+    );
+    assert!(
+        (end[0] - 1500.0).abs() < 1.0 && (end[1] - 1100.0).abs() < 1.0,
+        "the dragged corner follows the pointer: {end:?}"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    assert!(
+        is_annotation_red(image.get_pixel(1495, 1000).0),
+        "the rectangle reaches its new right edge"
+    );
+    assert!(
+        !is_annotation_red(image.get_pixel(900, 900).0),
+        "the old bottom edge is now interior and no longer painted"
+    );
+}
+
+#[test]
+fn dragging_a_corner_handle_resizes_an_ellipse() {
+    let dir = TempDir::new("resize-ellipse");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("o"));
+    rt.frame(0.0);
+    drag(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+    drag(&mut rt, [1200.0, 900.0], [1500.0, 1100.0]);
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Ellipse { start, end } = annotation.kind else {
+        panic!("expected an ellipse, got {:?}", annotation.kind);
+    };
+    assert!(
+        (start[0] - 600.0).abs() < 1.0 && (start[1] - 400.0).abs() < 1.0,
+        "the opposite corner stays fixed: {start:?}"
+    );
+    assert!(
+        (end[0] - 1500.0).abs() < 1.0 && (end[1] - 1100.0).abs() < 1.0,
+        "the dragged corner follows the pointer: {end:?}"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    assert!(
+        is_annotation_red(image.get_pixel(1495, 750).0),
+        "the ellipse reaches its new right edge"
+    );
+    assert!(
+        !is_annotation_red(image.get_pixel(1200, 650).0),
+        "the old right edge is no longer on the curve"
+    );
+}
+
+#[test]
+fn dragging_a_corner_handle_resizes_a_redaction() {
+    let dir = TempDir::new("resize-redaction");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("x"));
+    rt.frame(0.0);
+    drag(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+    drag(&mut rt, [1200.0, 900.0], [1500.0, 1100.0]);
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Redaction { start, end } = annotation.kind else {
+        panic!("expected a redaction, got {:?}", annotation.kind);
+    };
+    assert!(
+        (start[0] - 600.0).abs() < 1.0 && (start[1] - 400.0).abs() < 1.0,
+        "the opposite corner stays fixed: {start:?}"
+    );
+    assert!(
+        (end[0] - 1500.0).abs() < 1.0 && (end[1] - 1100.0).abs() < 1.0,
+        "the dragged corner follows the pointer: {end:?}"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    assert_eq!(
+        image.get_pixel(1300, 1000).0,
+        [0, 0, 0, 255],
+        "the redaction grew past its old right edge"
+    );
+    assert_ne!(
+        image.get_pixel(1550, 1000).0,
+        [0, 0, 0, 255],
+        "the redaction stops at its new right edge"
+    );
+}
+
+#[test]
+fn dragging_an_endpoint_handle_resizes_a_line() {
+    let dir = TempDir::new("resize-line");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_line(&mut rt, [600.0, 400.0], [1800.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [1200.0, 650.0]);
+    drag(&mut rt, [1800.0, 900.0], [2400.0, 300.0]);
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Line { start, end } = annotation.kind else {
+        panic!("expected a line, got {:?}", annotation.kind);
+    };
+    assert!(
+        (start[0] - 600.0).abs() < 1.0 && (start[1] - 400.0).abs() < 1.0,
+        "the opposite endpoint stays fixed: {start:?}"
+    );
+    assert!(
+        (end[0] - 2400.0).abs() < 1.0 && (end[1] - 300.0).abs() < 1.0,
+        "the dragged endpoint follows the pointer: {end:?}"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    assert!(
+        is_annotation_red(image.get_pixel(2395, 300).0),
+        "the line reaches its new endpoint"
+    );
+    assert!(
+        !is_annotation_red(image.get_pixel(1800, 900).0),
+        "the line no longer paints its old endpoint"
+    );
+}
+
+#[test]
+fn dragging_an_endpoint_handle_resizes_an_arrow() {
+    let dir = TempDir::new("resize-arrow");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("a"));
+    rt.frame(0.0);
+    drag(&mut rt, [600.0, 400.0], [1800.0, 400.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [1200.0, 400.0]);
+    drag(&mut rt, [600.0, 400.0], [900.0, 900.0]);
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Arrow { start, end } = annotation.kind else {
+        panic!("expected an arrow, got {:?}", annotation.kind);
+    };
+    assert!(
+        (start[0] - 900.0).abs() < 1.0 && (start[1] - 900.0).abs() < 1.0,
+        "the dragged start follows the pointer: {start:?}"
+    );
+    assert!(
+        (end[0] - 1800.0).abs() < 1.0 && (end[1] - 400.0).abs() < 1.0,
+        "the opposite endpoint stays fixed: {end:?}"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    assert!(
+        is_annotation_red(image.get_pixel(1200, 733).0),
+        "the arrow shaft follows the dragged start"
+    );
+    assert!(
+        !is_annotation_red(image.get_pixel(1200, 400).0),
+        "the old horizontal shaft is gone"
+    );
+}
+
+#[test]
 fn a_diagonal_line_is_hit_near_the_segment_not_at_its_bounding_box_corner() {
     let dir = TempDir::new("line-hit");
     let fixture = write_4k_fixture(dir.path());

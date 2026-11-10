@@ -319,6 +319,65 @@ impl Annotation {
 }
 
 impl AnnotationKind {
+    /// The drag handles in source-image pixels: four box corners clockwise from the top left,
+    /// or the two endpoints of a line or arrow. Text has none.
+    pub fn handles(&self) -> Vec<Point> {
+        match self {
+            Self::Line { start, end } | Self::Arrow { start, end } => vec![*start, *end],
+            Self::Rectangle { start, end }
+            | Self::Ellipse { start, end }
+            | Self::Redaction { start, end } => Rect::normalized(*start, *end).corners().to_vec(),
+            Self::Text { .. } => Vec::new(),
+        }
+    }
+
+    /// Drag `handle` to `point`, keeping the opposite corner or endpoint fixed. `None` when the
+    /// handle does not exist or the result would be too small to keep.
+    pub fn with_handle(&self, handle: usize, point: Point) -> Option<Self> {
+        match self {
+            Self::Line { start, end } => match handle {
+                0 => (line_length(point, *end) >= MIN_DRAG_PX).then_some(Self::Line {
+                    start: point,
+                    end: *end,
+                }),
+                1 => (line_length(*start, point) >= MIN_DRAG_PX).then_some(Self::Line {
+                    start: *start,
+                    end: point,
+                }),
+                _ => None,
+            },
+            Self::Arrow { start, end } => match handle {
+                0 => (line_length(point, *end) >= MIN_DRAG_PX).then_some(Self::Arrow {
+                    start: point,
+                    end: *end,
+                }),
+                1 => (line_length(*start, point) >= MIN_DRAG_PX).then_some(Self::Arrow {
+                    start: *start,
+                    end: point,
+                }),
+                _ => None,
+            },
+            Self::Rectangle { start, end }
+            | Self::Ellipse { start, end }
+            | Self::Redaction { start, end } => {
+                let corners = Rect::normalized(*start, *end).corners();
+                let fixed = *corners.get((handle + 2) % 4).filter(|_| handle < 4)?;
+                let rect = Rect::normalized(fixed, point);
+                if rect.is_too_small() {
+                    return None;
+                }
+                let start = [rect.x, rect.y];
+                let end = [rect.x + rect.w, rect.y + rect.h];
+                Some(match self {
+                    Self::Rectangle { .. } => Self::Rectangle { start, end },
+                    Self::Ellipse { .. } => Self::Ellipse { start, end },
+                    _ => Self::Redaction { start, end },
+                })
+            }
+            Self::Text { .. } => None,
+        }
+    }
+
     /// The same kind shifted by `dx`/`dy` in source-image pixels.
     pub fn translated(&self, dx: f32, dy: f32) -> Self {
         let shift = |point: Point| [point[0] + dx, point[1] + dy];
