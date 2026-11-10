@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
 use gnome_annotation::clipboard::MemoryClipboardSink;
-use gnome_annotation::document::{AnnotationKind, Rgba};
+use gnome_annotation::document::{AnnotationKind, PALETTE, Rgba, STROKE_WIDTHS_PT};
 use gnome_annotation::editor::{Editor, EditorOptions, Tool, editor_on_key, editor_view};
 use image::RgbaImage;
 use rune::edit::{Key, KeyEvent, Mods};
@@ -48,6 +48,14 @@ fn headless_editor(path: &std::path::Path) -> (MemoryClipboardSink, Runtime<Edit
     rt.on_key = Some(editor_on_key);
     rt.frame(0.0);
     (sink, rt)
+}
+
+fn press(rt: &mut Runtime<Editor>, key: &str) {
+    let (x, y) = rt.find(key).unwrap_or_else(|| panic!("{key} is present"));
+    rt.pointer_down(x, y);
+    rt.frame(0.0);
+    rt.pointer_up(x, y);
+    rt.frame(0.0);
 }
 
 fn canvas_rect(rt: &Runtime<Editor>) -> [f32; 4] {
@@ -257,4 +265,134 @@ fn redaction_is_opaque_black_with_no_outline() {
         [72, 72, 72, 255],
         "redaction has no outline outside its rectangle"
     );
+}
+
+fn near(px: [u8; 4], color: Rgba) -> bool {
+    px[3] == 255
+        && (i32::from(px[0]) - i32::from(color.r)).abs() <= 4
+        && (i32::from(px[1]) - i32::from(color.g)).abs() <= 4
+        && (i32::from(px[2]) - i32::from(color.b)).abs() <= 4
+}
+
+#[test]
+fn six_colours_and_three_widths_apply_to_new_annotations() {
+    let dir = TempDir::new("palette");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("l"));
+    rt.frame(0.0);
+
+    let fit = rt.state.fit_scale();
+    assert!(fit < 1.0, "the 4K capture is fitted into the window: {fit}");
+
+    for (index, color) in PALETTE.iter().enumerate() {
+        press(&mut rt, &format!("color-{index}"));
+        assert_eq!(
+            rt.state.color(),
+            *color,
+            "swatch {index} selects its colour"
+        );
+        let y = 300.0 + index as f32 * 220.0;
+        assert!(
+            drag(&mut rt, [400.0, y], [1600.0, y]),
+            "colour {index} line is previewed"
+        );
+        let annotation = rt.state.document().annotations().last().unwrap();
+        assert_eq!(annotation.color, *color, "the new line keeps the colour");
+        let AnnotationKind::Line { start, end } = annotation.kind else {
+            panic!("expected a line, got {:?}", annotation.kind);
+        };
+        assert_near(start, [400.0, y]);
+        assert_near(end, [1600.0, y]);
+    }
+
+    for (index, width_pt) in STROKE_WIDTHS_PT.iter().enumerate() {
+        press(&mut rt, &format!("width-{index}"));
+        assert_eq!(rt.state.width_pt(), *width_pt);
+        let y = 1700.0 + index as f32 * 140.0;
+        assert!(drag(&mut rt, [400.0, y], [1600.0, y]));
+        let annotation = rt.state.document().annotations().last().unwrap();
+        let expected_px = width_pt / fit;
+        assert!(
+            (annotation.stroke_px - expected_px).abs() < 0.01,
+            "width {width_pt} pt becomes {expected_px} px at fit {fit}, stored {}",
+            annotation.stroke_px
+        );
+    }
+
+    // Resizing the window changes the fit, never the stored stroke widths.
+    let stored: Vec<f32> = rt
+        .state
+        .document()
+        .annotations()
+        .iter()
+        .rev()
+        .take(3)
+        .map(|annotation| annotation.stroke_px)
+        .collect();
+    rt.set_viewport((900.0, 700.0), 1.0);
+    rt.frame(0.0);
+    rt.frame(0.0);
+    assert!(rt.state.fit_scale() < fit);
+    let after: Vec<f32> = rt
+        .state
+        .document()
+        .annotations()
+        .iter()
+        .rev()
+        .take(3)
+        .map(|annotation| annotation.stroke_px)
+        .collect();
+    assert_eq!(after, stored, "stored sizes survive a resize");
+
+    let image = export(&sink, &mut rt);
+    for (index, color) in PALETTE.iter().enumerate() {
+        let y = 300 + index as u32 * 220;
+        let px = image.get_pixel(1000, y).0;
+        assert!(
+            near(px, *color),
+            "colour {index} is in the export at its line: {px:?}"
+        );
+    }
+    for (index, width_pt) in STROKE_WIDTHS_PT.iter().enumerate() {
+        let y = 1700 + index as u32 * 140;
+        let expected = width_pt / fit;
+        let painted = (y - 30..=y + 30)
+            .filter(|row| near(image.get_pixel(1000, *row).0, PALETTE[5]))
+            .count();
+        assert!(
+            (painted as f32 - expected).abs() <= 3.0,
+            "width {width_pt} pt paints about {expected} px, found {painted}"
+        );
+    }
+}
+
+#[test]
+fn the_toolbar_fits_the_default_window() {
+    let dir = TempDir::new("toolbar");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, rt) = headless_editor(&fixture);
+
+    let (copy, _) = rt.presented("copy").expect("the copy button is shown");
+    assert!(
+        copy[0] >= 0.0 && copy[0] + copy[2] <= 1200.0,
+        "the copy button is inside the window: {copy:?}"
+    );
+    for key in [
+        "tool-select",
+        "tool-line",
+        "tool-arrow",
+        "tool-rect",
+        "tool-ellipse",
+        "tool-redaction",
+        "tool-text",
+        "width-0",
+        "width-1",
+        "width-2",
+        "color-0",
+        "color-5",
+    ] {
+        assert!(rt.presented(key).is_some(), "{key} is shown in the toolbar");
+    }
 }

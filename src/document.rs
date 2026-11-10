@@ -80,6 +80,41 @@ impl Rgba {
         a: 255,
     };
 
+    pub const ANNOTATION_ORANGE: Self = Self {
+        r: 255,
+        g: 120,
+        b: 0,
+        a: 255,
+    };
+
+    pub const ANNOTATION_YELLOW: Self = Self {
+        r: 246,
+        g: 211,
+        b: 45,
+        a: 255,
+    };
+
+    pub const ANNOTATION_GREEN: Self = Self {
+        r: 46,
+        g: 194,
+        b: 126,
+        a: 255,
+    };
+
+    pub const ANNOTATION_BLUE: Self = Self {
+        r: 53,
+        g: 132,
+        b: 228,
+        a: 255,
+    };
+
+    pub const ANNOTATION_PURPLE: Self = Self {
+        r: 145,
+        g: 65,
+        b: 172,
+        a: 255,
+    };
+
     pub const fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self { r, g, b, a }
     }
@@ -97,6 +132,19 @@ impl Rgba {
         0.2126 * channel(self.r) + 0.7152 * channel(self.g) + 0.0722 * channel(self.b)
     }
 }
+
+/// The six annotation colours offered by the toolbar, in palette order.
+pub const PALETTE: [Rgba; 6] = [
+    Rgba::ANNOTATION_RED,
+    Rgba::ANNOTATION_ORANGE,
+    Rgba::ANNOTATION_YELLOW,
+    Rgba::ANNOTATION_GREEN,
+    Rgba::ANNOTATION_BLUE,
+    Rgba::ANNOTATION_PURPLE,
+];
+
+/// The three stroke widths offered by the toolbar, in screen points at the current fit scale.
+pub const STROKE_WIDTHS_PT: [f32; 3] = [2.0, 4.0, 8.0];
 
 /// One annotation. The kind carries the geometry; every kind shares colour and stroke.
 #[derive(Clone, Debug, PartialEq)]

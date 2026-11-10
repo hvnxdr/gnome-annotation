@@ -16,8 +16,8 @@ use rune::{
 use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
 use crate::document::{
-    AnnotationKind, Document, MIN_DRAG_PX, Point, Rect, Rgba, arrow_geometry, ellipse_points,
-    line_length,
+    AnnotationKind, Document, MIN_DRAG_PX, PALETTE, Point, Rect, Rgba, STROKE_WIDTHS_PT,
+    arrow_geometry, ellipse_points, line_length,
 };
 use crate::export::{self, ExportError};
 use crate::render::render_annotations;
@@ -33,7 +33,7 @@ pub struct EditorOptions {
     pub image_path: PathBuf,
     pub clipboard: Arc<dyn ClipboardSink>,
     pub color: Rgba,
-    pub stroke_px: f32,
+    pub width_pt: f32,
     pub text_size_px: f32,
 }
 
@@ -43,7 +43,7 @@ impl EditorOptions {
             image_path: image_path.into(),
             clipboard,
             color: Rgba::ANNOTATION_RED,
-            stroke_px: 6.0,
+            width_pt: STROKE_WIDTHS_PT[1],
             text_size_px: 48.0,
         }
     }
@@ -94,7 +94,7 @@ pub struct Editor {
     overlay: Option<Overlay>,
     clipboard: Arc<dyn ClipboardSink>,
     color: Rgba,
-    stroke_px: f32,
+    width_pt: f32,
     text_size_px: f32,
     text_renderer: TextRenderer,
     canvas_pt: [f32; 2],
@@ -126,7 +126,7 @@ impl Editor {
             overlay: None,
             clipboard: options.clipboard,
             color: options.color,
-            stroke_px: options.stroke_px,
+            width_pt: options.width_pt,
             text_size_px: options.text_size_px,
             text_renderer: TextRenderer::new(),
             canvas_pt: [0.0, 0.0],
@@ -173,6 +173,27 @@ impl Editor {
         } else {
             1.0
         }
+    }
+
+    pub fn color(&self) -> Rgba {
+        self.color
+    }
+
+    pub fn width_pt(&self) -> f32 {
+        self.width_pt
+    }
+
+    pub fn set_color(&mut self, color: Rgba) {
+        self.color = color;
+    }
+
+    pub fn set_width_pt(&mut self, width_pt: f32) {
+        self.width_pt = width_pt;
+    }
+
+    /// The selected screen-point width converted to source-image pixels.
+    fn stroke_px(&self) -> f32 {
+        self.width_pt / self.fit_scale()
     }
 
     pub fn set_tool(&mut self, tool: Tool) {
@@ -246,7 +267,7 @@ impl Editor {
                 size_px: self.text_size_px,
             },
             self.color,
-            self.stroke_px,
+            self.stroke_px(),
         );
         self.rebuild_overlay();
     }
@@ -259,6 +280,7 @@ impl Editor {
         let Some(draft) = self.draft.take() else {
             return;
         };
+        let stroke_px = self.stroke_px();
         let kind = match draft.tool {
             Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX).then_some(
                 AnnotationKind::Line {
@@ -266,12 +288,12 @@ impl Editor {
                     end: draft.end,
                 },
             ),
-            Tool::Arrow => arrow_geometry(draft.start, draft.end, self.stroke_px).map(|_| {
-                AnnotationKind::Arrow {
+            Tool::Arrow => {
+                arrow_geometry(draft.start, draft.end, stroke_px).map(|_| AnnotationKind::Arrow {
                     start: draft.start,
                     end: draft.end,
-                }
-            }),
+                })
+            }
             Tool::Rectangle => {
                 let rect = Rect::normalized(draft.start, draft.end);
                 (!rect.is_too_small()).then_some(AnnotationKind::Rectangle {
@@ -301,7 +323,7 @@ impl Editor {
         let (color, stroke_px) = if matches!(kind, AnnotationKind::Redaction { .. }) {
             (Rgba::BLACK, 0.0)
         } else {
-            (self.color, self.stroke_px)
+            (self.color, stroke_px)
         };
         self.document.push(kind, color, stroke_px);
         self.rebuild_overlay();
@@ -429,7 +451,7 @@ fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
         return None;
     }
     let color = rune_color(editor.color);
-    let width = (editor.stroke_px * scale).max(0.5);
+    let width = editor.width_pt.max(0.5);
     let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
     match draft.tool {
         Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX).then(|| {
@@ -441,20 +463,22 @@ fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
                 color,
             )
         }),
-        Tool::Arrow => arrow_geometry(draft.start, draft.end, editor.stroke_px).map(|geometry| {
-            let mut shape = Shape::new().line(
-                to_pt(geometry.start),
-                to_pt(geometry.end),
-                width,
-                LineCap::Round,
-                color,
-            );
-            shape = shape.fill(
-                geometry.head.iter().map(|p| to_pt(*p)).collect::<Vec<_>>(),
-                color,
-            );
-            shape
-        }),
+        Tool::Arrow => {
+            arrow_geometry(draft.start, draft.end, editor.width_pt / scale).map(|geometry| {
+                let mut shape = Shape::new().line(
+                    to_pt(geometry.start),
+                    to_pt(geometry.end),
+                    width,
+                    LineCap::Round,
+                    color,
+                );
+                shape = shape.fill(
+                    geometry.head.iter().map(|p| to_pt(*p)).collect::<Vec<_>>(),
+                    color,
+                );
+                shape
+            })
+        }
         Tool::Rectangle => {
             let rect = Rect::normalized(draft.start, draft.end);
             (!rect.is_too_small()).then(|| {
@@ -509,7 +533,7 @@ fn tool_button(
         .focusable(true)
         .cursor(rune::Cursor::Pointer)
         .h(32.0)
-        .px(space::S3)
+        .px(space::S2)
         .radius(tok::radius::SM)
         .fill(fill)
         .hover(if active { accent } else { theme.hover })
@@ -517,6 +541,55 @@ fn tool_button(
         .center_y()
         .on_press(move |editor: &mut Editor| on_press(editor))
         .child(text(label).font(type_::LABEL).color(ink))
+}
+
+fn color_swatch(index: usize, selected: bool, theme: &tok::Theme) -> El {
+    let color = PALETTE[index];
+    let ring = if selected {
+        theme.text
+    } else {
+        theme.card_border
+    };
+    let ring_width = if selected { 3.0 } else { 1.0 };
+    el().key(format!("color-{index}"))
+        .role("button")
+        .label(format!("Colour {}", index + 1))
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .size(22.0, 22.0)
+        .radius(11.0)
+        .fill(rune_color(color))
+        .border(ring_width, ring)
+        .hover(rune_color(color))
+        .press(rune_color(color))
+        .on_press(move |editor: &mut Editor| editor.set_color(PALETTE[index]))
+}
+
+fn width_button(index: usize, selected: bool, theme: &tok::Theme, accent: Color) -> El {
+    let width_pt = STROKE_WIDTHS_PT[index];
+    let fill = if selected {
+        accent
+    } else {
+        theme.control_track
+    };
+    let ink = if selected { Color::WHITE } else { theme.text };
+    el().key(format!("width-{index}"))
+        .role("button")
+        .label(format!("Stroke width {width_pt} points"))
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .size(30.0, 30.0)
+        .radius(tok::radius::SM)
+        .fill(fill)
+        .hover(if selected { accent } else { theme.hover })
+        .press(if selected { accent } else { theme.press })
+        .center()
+        .on_press(move |editor: &mut Editor| editor.set_width_pt(width_pt))
+        .child(
+            text(format!("{}", width_pt as u32))
+                .font(type_::LABEL)
+                .color(ink),
+        )
 }
 
 pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
@@ -617,6 +690,15 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
             |e| e.set_tool(Tool::Select),
         ))
         .child(tool_button(
+            "Line",
+            "tool-line",
+            "L",
+            editor.tool == Tool::Line,
+            &theme,
+            accent,
+            |e| e.set_tool(Tool::Line),
+        ))
+        .child(tool_button(
             "Arrow",
             "tool-arrow",
             "A",
@@ -626,6 +708,33 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
             |e| e.set_tool(Tool::Arrow),
         ))
         .child(tool_button(
+            "Rect",
+            "tool-rect",
+            "R",
+            editor.tool == Tool::Rectangle,
+            &theme,
+            accent,
+            |e| e.set_tool(Tool::Rectangle),
+        ))
+        .child(tool_button(
+            "Ellipse",
+            "tool-ellipse",
+            "O",
+            editor.tool == Tool::Ellipse,
+            &theme,
+            accent,
+            |e| e.set_tool(Tool::Ellipse),
+        ))
+        .child(tool_button(
+            "Redact",
+            "tool-redaction",
+            "X",
+            editor.tool == Tool::Redaction,
+            &theme,
+            accent,
+            |e| e.set_tool(Tool::Redaction),
+        ))
+        .child(tool_button(
             "Text",
             "tool-text",
             "T",
@@ -633,7 +742,19 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
             &theme,
             accent,
             |e| e.set_tool(Tool::Text),
-        ))
+        ));
+    for index in 0..PALETTE.len() {
+        toolbar = toolbar.child(color_swatch(index, editor.color == PALETTE[index], &theme));
+    }
+    for index in 0..STROKE_WIDTHS_PT.len() {
+        toolbar = toolbar.child(width_button(
+            index,
+            editor.width_pt == STROKE_WIDTHS_PT[index],
+            &theme,
+            accent,
+        ));
+    }
+    toolbar = toolbar
         .child(rune::spacer())
         .child(
             text("Enter copies · Esc cancels")
