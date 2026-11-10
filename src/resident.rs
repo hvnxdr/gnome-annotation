@@ -127,7 +127,8 @@ pub fn run_daemon() -> Result<(), String> {
         host,
     ));
 
-    let server = match SocketServer::bind(daemon.clone()) {
+    let socket = socket_path();
+    let server = match SocketServer::bind_at(socket.clone(), daemon.clone()) {
         Ok(server) => server,
         Err(IpcError::AlreadyRunning) => {
             eprintln!("gnome-annotation: another daemon is already running");
@@ -135,6 +136,7 @@ pub fn run_daemon() -> Result<(), String> {
         }
         Err(error) => return Err(format!("cannot start the daemon socket: {error}")),
     };
+    eprintln!("gnome-annotation: daemon listening on {}", socket.display());
 
     let state = DaemonState {
         editor: None,

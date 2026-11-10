@@ -115,8 +115,9 @@ app.
 
 ## Decisions and deviations
 
-- The ticket says `modal: true`; the parent spec says `modal: false`. The adapter follows the
-  ticket. It passes `interactive: true` and omits `target` because the installed portal is
+- The ticket says `modal: true`; the parent spec says `modal: false`. The spike followed the
+  ticket. HVN-30 restored `modal: false` as the parent spec requires; `interactive: true` and
+  the response mapping are unchanged. `target` is omitted because the installed portal is
   version 2.
 - All committed annotations render into one source-resolution RGBA layer with tiny-skia. The
   preview draws that layer as a Rune image and the exporter composites the same pixmap, so
@@ -129,8 +130,8 @@ app.
 - While typing, the editor uses a Rune `text_input` scaled to the fitted canvas. On commit the
   text becomes source-resolution outlines. The field and the committed label can differ by a
   fraction of a point while the font is screen-scaled.
-- `--capture` is one-shot. The resident daemon, socket, trigger client, and autostart are
-  HVN-30.
+- `--capture` is one-shot. HVN-30 adds the resident daemon, socket, trigger client, and
+  autostart beside it; the one-shot mode stays for manual testing.
 - The toolbar is minimal: Select, Arrow, Text, and Copy. Select has no move, resize, or
   delete yet. Undo, redo, save, and the rest of the palette are later tickets.
 - The editor keeps the source RGBA bytes, a premultiplied source pixmap, and a full-size
