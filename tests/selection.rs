@@ -6,12 +6,13 @@ use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
 use gnome_annotation::clipboard::MemoryClipboardSink;
+use gnome_annotation::document::AnnotationKind;
 use gnome_annotation::editor::{Editor, EditorOptions, editor_on_key, editor_view};
 use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
 use rune::{Env, Runtime, Waker};
 
-use support::{TempDir, write_4k_fixture};
+use support::{TempDir, decode_png, is_annotation_red, write_4k_fixture};
 
 fn noop_waker() -> Waker {
     Arc::new(|| {})
@@ -93,6 +94,73 @@ fn select_topmost_shapes(rt: &mut Runtime<Editor>) {
     draw_rectangle(rt, [900.0, 600.0], [1500.0, 1000.0]);
     rt.key(key_text("v"));
     rt.frame(0.0);
+}
+
+#[test]
+fn dragging_a_selected_rectangle_moves_it() {
+    let dir = TempDir::new("move-rect");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+    assert!(rt.state.selected().is_some(), "the rectangle is selected");
+
+    let rect = canvas_rect(&rt);
+    let image = rt.state.image_size();
+    let (x0, y0) = window_point(rect, [900.0, 650.0], image);
+    let (x1, y1) = window_point(rect, [1500.0, 1050.0], image);
+    rt.pointer_down(x0, y0);
+    rt.frame(0.0);
+    let keys: Vec<String> = rt
+        .elements()
+        .iter()
+        .filter_map(|element| element.key.clone())
+        .collect();
+    assert!(
+        keys.iter().any(|key| key == "live"),
+        "the moved rectangle is previewed while dragging"
+    );
+    assert!(
+        !keys.iter().any(|key| key == "annotations"),
+        "the committed overlay leaves the moving rectangle out"
+    );
+    rt.pointer_move(x1, y1);
+    rt.frame(0.0);
+    rt.pointer_up(x1, y1);
+    rt.frame(0.0);
+    assert!(
+        rt.elements()
+            .iter()
+            .any(|element| element.key.as_deref() == Some("annotations")),
+        "the committed overlay is rebuilt on release"
+    );
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Rectangle { start, end } = annotation.kind else {
+        panic!("expected a rectangle, got {:?}", annotation.kind);
+    };
+    assert!(
+        (start[0] - 1200.0).abs() < 1.0 && (start[1] - 800.0).abs() < 1.0,
+        "the top-left corner moves by the drag delta: {start:?}"
+    );
+    assert!(
+        (end[0] - 1800.0).abs() < 1.0 && (end[1] - 1300.0).abs() < 1.0,
+        "the bottom-right corner moves by the drag delta: {end:?}"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    assert!(
+        !is_annotation_red(image.get_pixel(900, 400).0),
+        "the rectangle no longer paints its old top edge"
+    );
+    assert!(
+        is_annotation_red(image.get_pixel(1500, 800).0),
+        "the rectangle paints its new top edge"
+    );
 }
 
 #[test]

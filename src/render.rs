@@ -16,11 +16,31 @@ pub fn render_annotations(
     width: u32,
     height: u32,
 ) -> Option<Pixmap> {
-    if document.is_empty() {
+    render_annotations_excluding(text, document, None, width, height)
+}
+
+/// Rasterise the document without one annotation. Moves and resizes use this for the static
+/// base layer and draw the adjusted annotation live above it.
+pub fn render_annotations_excluding(
+    text: &mut TextRenderer,
+    document: &Document,
+    skip: Option<u64>,
+    width: u32,
+    height: u32,
+) -> Option<Pixmap> {
+    if document.is_empty()
+        || !document
+            .annotations()
+            .iter()
+            .any(|annotation| Some(annotation.id) != skip)
+    {
         return None;
     }
     let mut pixmap = Pixmap::new(width, height)?;
     for annotation in document.annotations() {
+        if Some(annotation.id) == skip {
+            continue;
+        }
         match &annotation.kind {
             AnnotationKind::Line { start, end } => {
                 draw_line(

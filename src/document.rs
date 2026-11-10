@@ -279,6 +279,33 @@ impl Document {
         &self.annotations
     }
 
+    pub fn get(&self, id: u64) -> Option<&Annotation> {
+        self.annotations
+            .iter()
+            .find(|annotation| annotation.id == id)
+    }
+
+    /// Replace one annotation's geometry, keeping its style. False when the id is gone.
+    pub fn set_kind(&mut self, id: u64, kind: AnnotationKind) -> bool {
+        let Some(annotation) = self
+            .annotations
+            .iter_mut()
+            .find(|annotation| annotation.id == id)
+        else {
+            return false;
+        };
+        annotation.kind = kind;
+        true
+    }
+
+    pub fn remove(&mut self, id: u64) -> Option<Annotation> {
+        let index = self
+            .annotations
+            .iter()
+            .position(|annotation| annotation.id == id)?;
+        Some(self.annotations.remove(index))
+    }
+
     pub fn is_empty(&self) -> bool {
         self.annotations.is_empty()
     }
@@ -288,6 +315,44 @@ impl Annotation {
     /// Whether `point` lands on this annotation, using `tolerance_px` for thin strokes.
     pub fn hit_test(&self, point: Point, tolerance_px: f32) -> bool {
         self.kind.hit_test(point, tolerance_px)
+    }
+}
+
+impl AnnotationKind {
+    /// The same kind shifted by `dx`/`dy` in source-image pixels.
+    pub fn translated(&self, dx: f32, dy: f32) -> Self {
+        let shift = |point: Point| [point[0] + dx, point[1] + dy];
+        match self {
+            Self::Line { start, end } => Self::Line {
+                start: shift(*start),
+                end: shift(*end),
+            },
+            Self::Arrow { start, end } => Self::Arrow {
+                start: shift(*start),
+                end: shift(*end),
+            },
+            Self::Rectangle { start, end } => Self::Rectangle {
+                start: shift(*start),
+                end: shift(*end),
+            },
+            Self::Ellipse { start, end } => Self::Ellipse {
+                start: shift(*start),
+                end: shift(*end),
+            },
+            Self::Redaction { start, end } => Self::Redaction {
+                start: shift(*start),
+                end: shift(*end),
+            },
+            Self::Text {
+                position,
+                text,
+                size_px,
+            } => Self::Text {
+                position: shift(*position),
+                text: text.clone(),
+                size_px: *size_px,
+            },
+        }
     }
 }
 

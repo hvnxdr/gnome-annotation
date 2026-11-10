@@ -16,11 +16,11 @@ use rune::{
 use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
 use crate::document::{
-    AnnotationKind, Document, MIN_DRAG_PX, PALETTE, Point, Rect, Rgba, STROKE_WIDTHS_PT,
-    arrow_geometry, crop_segment, ellipse_points, line_length,
+    Annotation, AnnotationKind, Document, MIN_DRAG_PX, PALETTE, Point, Rect, Rgba,
+    STROKE_WIDTHS_PT, arrow_geometry, crop_segment, ellipse_points, line_length,
 };
 use crate::export::{self, ExportError};
-use crate::render::render_annotations;
+use crate::render::render_annotations_excluding;
 use crate::source::{LoadError, SourceImage};
 use crate::text::TextRenderer;
 
@@ -77,6 +77,23 @@ struct Draft {
     end: Point,
 }
 
+/// A text raster kept for the live preview while its annotation moves.
+struct LiveText {
+    image: rune::Image,
+    offset: [f32; 2],
+    size: [f32; 2],
+}
+
+/// One selection adjustment in flight. The document holds the annotation at its old geometry
+/// until the gesture commits; `live` is what the canvas previews.
+struct Gesture {
+    id: u64,
+    origin: Annotation,
+    live: Annotation,
+    anchor: Point,
+    text: Option<LiveText>,
+}
+
 struct Overlay {
     pixmap: tiny_skia::Pixmap,
     image: Option<rune::Image>,
@@ -89,6 +106,7 @@ pub struct Editor {
     cache: Option<ImageCache>,
     document: Document,
     selected: Option<u64>,
+    gesture: Option<Gesture>,
     tool: Tool,
     draft: Option<Draft>,
     editing: Option<Editing>,
@@ -122,6 +140,7 @@ impl Editor {
             cache: None,
             document: Document::new(),
             selected: None,
+            gesture: None,
             tool: Tool::Select,
             draft: None,
             editing: None,
@@ -354,9 +373,16 @@ impl Editor {
     }
 
     fn rebuild_overlay(&mut self) {
-        let pixmap = render_annotations(
+        self.rebuild_overlay_excluding(None);
+    }
+
+    /// Rasterise the committed annotations into the preview/export layer, optionally leaving
+    /// the annotation under adjustment out so the live preview can replace it.
+    fn rebuild_overlay_excluding(&mut self, skip: Option<u64>) {
+        let pixmap = render_annotations_excluding(
             &mut self.text_renderer,
             &self.document,
+            skip,
             self.source.width,
             self.source.height,
         );
@@ -382,12 +408,75 @@ impl Editor {
         [drag.x / scale, drag.y / scale]
     }
 
+    /// Rasterise text once for the live preview; only its position changes while dragging.
+    fn live_text(&mut self, text: &str, size_px: f32, color: Rgba) -> Option<LiveText> {
+        let raster = self.text_renderer.rasterize(text, size_px, color)?;
+        let cache = self.cache.as_ref()?;
+        let image = cache.rgba(
+            raster.pixmap.width(),
+            raster.pixmap.height(),
+            export::straight_rgba(&raster.pixmap),
+        );
+        Some(LiveText {
+            image,
+            offset: [raster.offset[0] as f32, raster.offset[1] as f32],
+            size: [raster.pixmap.width() as f32, raster.pixmap.height() as f32],
+        })
+    }
+
+    fn begin_select(&mut self, point: Point) {
+        let Some(id) = self.hit_test(point) else {
+            self.selected = None;
+            self.gesture = None;
+            return;
+        };
+        self.selected = Some(id);
+        let Some(annotation) = self.document.get(id).cloned() else {
+            return;
+        };
+        let text = match &annotation.kind {
+            AnnotationKind::Text { text, size_px, .. } => {
+                self.live_text(text, *size_px, annotation.color)
+            }
+            _ => None,
+        };
+        self.gesture = Some(Gesture {
+            id,
+            origin: annotation.clone(),
+            live: annotation,
+            anchor: point,
+            text,
+        });
+        self.rebuild_overlay_excluding(Some(id));
+    }
+
+    fn move_gesture(&mut self, point: Point) {
+        let Some(gesture) = &mut self.gesture else {
+            return;
+        };
+        let dx = point[0] - gesture.anchor[0];
+        let dy = point[1] - gesture.anchor[1];
+        gesture.live.kind = gesture.origin.kind.translated(dx, dy);
+    }
+
+    fn finish_gesture(&mut self, cancelled: bool) {
+        let Some(gesture) = self.gesture.take() else {
+            return;
+        };
+        if !cancelled {
+            self.document.set_kind(gesture.id, gesture.live.kind);
+        }
+        self.rebuild_overlay();
+    }
+
     fn on_canvas_drag(&mut self, drag: &Drag) {
         match self.tool {
             Tool::Select => {
-                if drag.phase == Phase::Down {
-                    let point = self.drag_point(drag);
-                    self.selected = self.hit_test(point);
+                let point = self.drag_point(drag);
+                match drag.phase {
+                    Phase::Down => self.begin_select(point),
+                    Phase::Move => self.move_gesture(point),
+                    Phase::Up => self.finish_gesture(drag.cancelled()),
                 }
             }
             Tool::Line | Tool::Arrow | Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {
@@ -562,6 +651,70 @@ fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
     }
 }
 
+/// The live preview of an annotation under adjustment, built from the same geometry the
+/// exporter uses once the gesture commits.
+fn annotation_shape(annotation: &Annotation, scale: f32) -> Option<Shape> {
+    if scale <= 0.0 {
+        return None;
+    }
+    let color = rune_color(annotation.color);
+    let width = (annotation.stroke_px * scale).max(0.5);
+    let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
+    match &annotation.kind {
+        AnnotationKind::Line { start, end } => (line_length(*start, *end) >= MIN_DRAG_PX)
+            .then(|| Shape::new().line(to_pt(*start), to_pt(*end), width, LineCap::Round, color)),
+        AnnotationKind::Arrow { start, end } => arrow_geometry(*start, *end, annotation.stroke_px)
+            .map(|geometry| {
+                let mut shape = Shape::new().line(
+                    to_pt(geometry.start),
+                    to_pt(geometry.end),
+                    width,
+                    LineCap::Round,
+                    color,
+                );
+                shape = shape.fill(
+                    geometry.head.iter().map(|p| to_pt(*p)).collect::<Vec<_>>(),
+                    color,
+                );
+                shape
+            }),
+        AnnotationKind::Rectangle { start, end } => {
+            let rect = Rect::normalized(*start, *end);
+            (!rect.is_too_small()).then(|| {
+                Shape::new().stroke_with(
+                    rect.corners().map(to_pt).to_vec(),
+                    true,
+                    width,
+                    LineCap::Round,
+                    color,
+                )
+            })
+        }
+        AnnotationKind::Ellipse { start, end } => {
+            let rect = Rect::normalized(*start, *end);
+            (!rect.is_too_small()).then(|| {
+                Shape::new().stroke_with(
+                    ellipse_points(rect)
+                        .into_iter()
+                        .map(to_pt)
+                        .collect::<Vec<_>>(),
+                    true,
+                    width,
+                    LineCap::Round,
+                    color,
+                )
+            })
+        }
+        AnnotationKind::Redaction { start, end } => {
+            let rect = Rect::normalized(*start, *end);
+            (!rect.is_too_small()).then(|| {
+                Shape::new().fill(rect.corners().map(to_pt).to_vec(), rune_color(Rgba::BLACK))
+            })
+        }
+        AnnotationKind::Text { .. } => None,
+    }
+}
+
 fn tool_button<S: HostsEditor + 'static>(
     label: &str,
     key: &'static str,
@@ -692,6 +845,41 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                 .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
                 .clip_rounded(0.0),
         );
+    }
+    if let Some(gesture) = &editor.gesture {
+        let scale = editor.fit_scale();
+        if scale > 0.0 {
+            let mut layer = el()
+                .key("live")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .clip_rounded(0.0);
+            let mut painted = false;
+            if let Some(shape) = annotation_shape(&gesture.live, scale) {
+                layer = layer.child(
+                    canvas(shape)
+                        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                        .clip_rounded(0.0),
+                );
+                painted = true;
+            }
+            if let (Some(text), AnnotationKind::Text { position, .. }) =
+                (&gesture.text, &gesture.live.kind)
+            {
+                layer = layer.child(
+                    el().key("live-text")
+                        .absolute(
+                            (position[0] + text.offset[0]) * scale,
+                            (position[1] + text.offset[1]) * scale,
+                        )
+                        .size(text.size[0] * scale, text.size[1] * scale)
+                        .pixels(text.image.pixels()),
+                );
+                painted = true;
+            }
+            if painted {
+                canvas_el = canvas_el.child(layer);
+            }
+        }
     }
     if let Some(editing) = &editor.editing {
         let scale = if editor.canvas_pt[0] > 0.0 {
