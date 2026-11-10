@@ -2,8 +2,10 @@
 
 pub mod assets;
 pub mod capture;
+pub mod cli;
 pub mod clipboard;
 pub mod document;
+pub mod editor;
 pub mod export;
 pub mod render;
 pub mod source;
