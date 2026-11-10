@@ -487,10 +487,10 @@ fn six_colours_and_three_widths_apply_to_new_annotations() {
 }
 
 #[test]
-fn the_toolbar_fits_the_default_window() {
+fn the_toolbar_fits_the_default_window_and_its_tool_buttons_work() {
     let dir = TempDir::new("toolbar");
     let fixture = write_4k_fixture(dir.path());
-    let (_sink, rt) = headless_editor(&fixture);
+    let (_sink, mut rt) = headless_editor(&fixture);
 
     let (copy, _) = rt.presented("copy").expect("the copy button is shown");
     assert!(
@@ -512,5 +512,18 @@ fn the_toolbar_fits_the_default_window() {
         "color-5",
     ] {
         assert!(rt.presented(key).is_some(), "{key} is shown in the toolbar");
+    }
+
+    for (key, expected) in [
+        ("tool-select", Tool::Select),
+        ("tool-line", Tool::Line),
+        ("tool-arrow", Tool::Arrow),
+        ("tool-rect", Tool::Rectangle),
+        ("tool-ellipse", Tool::Ellipse),
+        ("tool-redaction", Tool::Redaction),
+        ("tool-text", Tool::Text),
+    ] {
+        press(&mut rt, key);
+        assert_eq!(rt.state.tool(), expected, "{key} selects {expected:?}");
     }
 }
