@@ -234,6 +234,41 @@ fn text_is_selected_by_its_ink_and_can_be_moved() {
 }
 
 #[test]
+fn exporting_during_a_move_uses_the_committed_geometry() {
+    let dir = TempDir::new("move-export");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+
+    let rect = canvas_rect(&rt);
+    let image = rt.state.image_size();
+    let (x0, y0) = window_point(rect, [900.0, 650.0], image);
+    let (x1, y1) = window_point(rect, [1500.0, 1050.0], image);
+    rt.pointer_down(x0, y0);
+    rt.frame(0.0);
+    rt.pointer_move(x1, y1);
+    rt.frame(0.0);
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let exported = decode_png(&png);
+    assert!(
+        is_annotation_red(exported.get_pixel(900, 400).0),
+        "the export keeps the rectangle where the document has it"
+    );
+    assert!(
+        !is_annotation_red(exported.get_pixel(1500, 800).0),
+        "the uncommitted live position is not exported"
+    );
+
+    rt.pointer_up(x1, y1);
+    rt.frame(0.0);
+}
+
+#[test]
 fn pressing_another_annotation_selects_and_moves_it_in_the_same_gesture() {
     let dir = TempDir::new("move-other");
     let fixture = write_4k_fixture(dir.path());

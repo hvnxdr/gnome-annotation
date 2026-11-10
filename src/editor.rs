@@ -20,7 +20,7 @@ use crate::document::{
     STROKE_WIDTHS_PT, arrow_geometry, crop_segment, ellipse_points, line_length, point_in_rect,
 };
 use crate::export::{self, ExportError};
-use crate::render::render_annotations_excluding;
+use crate::render::{render_annotations, render_annotations_excluding};
 use crate::source::{LoadError, SourceImage};
 use crate::text::TextRenderer;
 
@@ -306,12 +306,26 @@ impl Editor {
         self.error.as_deref()
     }
 
-    /// Flatten the source and annotations and encode one PNG.
-    pub fn export_png(&self) -> Result<Vec<u8>, ExportError> {
-        let composed = export::compose(
-            &self.source_pixmap,
-            self.overlay.as_ref().map(|o| &o.pixmap),
-        )?;
+    /// Flatten the source and annotations and encode one PNG. An adjustment in flight keeps
+    /// the annotation at its committed geometry, even though the preview leaves it out of the
+    /// base layer.
+    pub fn export_png(&mut self) -> Result<Vec<u8>, ExportError> {
+        let during_gesture = if self.gesture.is_some() {
+            render_annotations(
+                &mut self.text_renderer,
+                &self.document,
+                self.source.width,
+                self.source.height,
+            )
+        } else {
+            None
+        };
+        let overlay = if self.gesture.is_some() {
+            during_gesture.as_ref()
+        } else {
+            self.overlay.as_ref().map(|overlay| &overlay.pixmap)
+        };
+        let composed = export::compose(&self.source_pixmap, overlay)?;
         export::encode_png(&composed)
     }
 
