@@ -24,3 +24,4 @@ swash = "0.2"
 zbus = { version = "6", default-features = false, features = ["tokio", "proxy"] }
 tokio = { version = "1", features = ["rt", "time"] }
 futures-util = "0.3"
+libc = "0.2"

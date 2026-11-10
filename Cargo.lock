@@ -1030,6 +1030,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "image",
+ "libc",
  "parley",
  "png 0.18.1",
  "rune",

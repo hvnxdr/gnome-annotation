@@ -8,6 +8,7 @@ pub mod daemon;
 pub mod document;
 pub mod editor;
 pub mod export;
+pub mod ipc;
 pub mod notify;
 pub mod render;
 pub mod source;
