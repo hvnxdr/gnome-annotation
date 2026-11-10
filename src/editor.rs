@@ -87,6 +87,15 @@ struct LiveText {
     size: [f32; 2],
 }
 
+/// What the pointer is over, for the canvas cursor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum Hover {
+    #[default]
+    None,
+    Move,
+    Handle,
+}
+
 /// What a selection gesture changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GestureMode {
@@ -125,6 +134,7 @@ pub struct Editor {
     selected: Option<u64>,
     gesture: Option<Gesture>,
     chrome: Option<Chrome>,
+    hover: Hover,
     tool: Tool,
     draft: Option<Draft>,
     editing: Option<Editing>,
@@ -160,6 +170,7 @@ impl Editor {
             selected: None,
             gesture: None,
             chrome: None,
+            hover: Hover::None,
             tool: Tool::Select,
             draft: None,
             editing: None,
@@ -283,6 +294,7 @@ impl Editor {
             self.commit_text();
         }
         self.draft = None;
+        self.hover = Hover::None;
         self.tool = tool;
     }
 
@@ -466,11 +478,9 @@ impl Editor {
         })
     }
 
-    fn handle_at(&self, annotation: &Annotation, point: Point) -> Option<usize> {
+    fn handle_at(&self, handles: &[Point], point: Point) -> Option<usize> {
         let tolerance_px = 6.0 / self.fit_scale().max(f32::EPSILON);
-        annotation
-            .kind
-            .handles()
+        handles
             .iter()
             .position(|handle| line_length(*handle, point) <= tolerance_px)
     }
@@ -539,7 +549,7 @@ impl Editor {
     fn begin_select(&mut self, point: Point) {
         let selected = self.selected.and_then(|id| self.document.get(id)).cloned();
         if let Some(annotation) = selected
-            && let Some(handle) = self.handle_at(&annotation, point)
+            && let Some(handle) = self.handle_at(&annotation.kind.handles(), point)
         {
             self.begin_gesture(annotation, GestureMode::Resize { handle }, point);
             return;
@@ -548,6 +558,7 @@ impl Editor {
             self.selected = None;
             self.gesture = None;
             self.chrome = None;
+            self.hover = Hover::None;
             return;
         };
         self.selected = Some(id);
@@ -607,6 +618,7 @@ impl Editor {
         self.selected = None;
         self.gesture = None;
         self.chrome = None;
+        self.hover = Hover::None;
         if removed {
             self.rebuild_overlay();
         }
@@ -622,6 +634,34 @@ impl Editor {
         }
         self.rebuild_overlay();
         self.refresh_chrome();
+    }
+
+    /// Track the pointer over the canvas so its cursor can say Move or Grab. Changing only
+    /// when the class changes keeps ordinary pointer motion from rebuilding the view.
+    fn on_canvas_pointer_move(&mut self, local: [f32; 2]) {
+        if self.tool != Tool::Select || self.gesture.is_some() {
+            return;
+        }
+        let scale = self.canvas_pt[0] / self.source.width as f32;
+        if scale <= 0.0 {
+            return;
+        }
+        let point = [local[0] / scale, local[1] / scale];
+        let hover = if self
+            .chrome
+            .as_ref()
+            .and_then(|chrome| self.handle_at(&chrome.handles, point))
+            .is_some()
+        {
+            Hover::Handle
+        } else if self.selected.is_some() && self.hit_test(point) == self.selected {
+            Hover::Move
+        } else {
+            Hover::None
+        };
+        if hover != self.hover {
+            self.hover = hover;
+        }
     }
 
     fn on_canvas_drag(&mut self, drag: &Drag) {
@@ -1145,7 +1185,18 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                 }),
         );
     }
+    let cursor = match editor.hover {
+        Hover::Move => rune::Cursor::Move,
+        Hover::Handle => rune::Cursor::Grab,
+        Hover::None => rune::Cursor::Default,
+    };
     canvas_el = canvas_el
+        .cursor(cursor)
+        .on_pointer_move_local(|state: &mut S, event, _tx| {
+            if let Some(editor) = state.editor_mut() {
+                editor.on_canvas_pointer_move([event.x, event.y]);
+            }
+        })
         .on_drawn_layout(|state: &mut S, [_x, _y, w, h]| {
             if let Some(editor) = state.editor_mut() {
                 editor.canvas_pt = [w, h];
