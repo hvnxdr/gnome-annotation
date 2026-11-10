@@ -3,9 +3,9 @@
 Annotate a screenshot from GNOME's own screenshot UI and copy the result at source
 resolution.
 
-This repository is at the framework gate. It has the capture path, the editor window, arrow
-and text annotations, PNG export, and a clipboard seam. The daemon, palette, undo, and save
-dialog come later.
+This is the v1 build after the framework gate. It has the resident daemon and Print
+trigger, the capture path, the editor window, arrow and text annotations, PNG export, and
+a clipboard seam. The palette, selection, undo, and save dialog come later.
 
 ## Requirements
 
@@ -17,6 +17,28 @@ dialog come later.
 
 Rune is pinned to revision `47cb857795c3b1dd5097c15d6161719ae738ddda`. Cargo needs that
 revision once; after it is in the cargo cache, `--offline` builds work.
+
+## Install
+
+```sh
+scripts/install.sh
+```
+
+The installer builds the release binary, installs it to `${XDG_BIN_HOME:-$HOME/.local/bin}`,
+writes a desktop entry and a daemon autostart entry, and appends a Print custom keybinding.
+Existing custom keybindings keep their order. To start the daemon without logging out,
+either log in again or run the installed binary with `--daemon`.
+
+The binding runs `<binary> --trigger`, not `--capture`. The one-shot `--capture` mode makes
+its own portal call, so it cannot focus the daemon's open editor; the trigger goes through
+the daemon and keeps unsaved annotations on a second Print press.
+
+```sh
+scripts/install.sh --uninstall
+```
+
+Uninstall removes only the binary, the two entries, and the one keybinding path the
+installer added.
 
 ## Build
 
@@ -33,19 +55,33 @@ For the fastest editor startup, run the release binary:
 ## Run
 
 ```sh
+# Ask the running daemon for a capture. Starts the daemon if it is not running.
+gnome-annotation
+
+# The resident daemon. The autostart entry runs this at login.
+gnome-annotation --daemon
+
 # Open the editor on an existing PNG (the test seam).
 gnome-annotation --editor capture.png
 
-# One-shot: open GNOME's screenshot UI, then edit what it saved.
+# One-shot: open GNOME's screenshot UI in this process, then edit what it saved.
 gnome-annotation --capture
 
 # Usage.
 gnome-annotation --help
 ```
 
-`--capture` opens GNOME's selection, window, and screen modes through the Screenshot
-portal. A cancelled capture exits silently. A portal or image error prints to stderr and
-exits non-zero.
+The daemon listens on `$XDG_RUNTIME_DIR/gnome-annotation.sock` (a per-user directory in
+the temp directory when `XDG_RUNTIME_DIR` is unset). It holds a lock file so only one
+daemon runs. A trigger is accepted before the portal call, and the client exits as soon as
+the daemon accepts. A second trigger while the editor is open focuses the editor and keeps
+its annotations.
+
+A portal failure or an unreadable capture is logged to stderr and shown as a desktop
+notification. Cancelling GNOME's capture UI opens nothing.
+
+`--capture` is the separate one-shot path: its portal call runs in that process, so it does
+not coordinate with the daemon. It is kept for manual testing.
 
 In the editor:
 
@@ -68,7 +104,9 @@ cargo test --offline
 
 The editor tests drive a real Rune runtime through the explicit-image seam: they generate a
 3840x2160 fixture, draw an arrow with the pointer, type and commit a label, press Enter, and
-assert on the PNG a memory clipboard sink received.
+assert on the PNG a memory clipboard sink received. The daemon tests cover the state
+machine, the socket, the trigger client, and the installer with a fake `gsettings` and a
+temporary HOME.
 
 To print the spike timings:
 
@@ -84,17 +122,21 @@ run.
 | Path | Contents |
 | --- | --- |
 | `src/capture.rs` | Screenshot portal trait and zbus adapter |
+| `src/daemon.rs` | Resident capture state machine |
+| `src/ipc.rs` | Unix socket server, lock file, trigger client |
+| `src/notify.rs` | Desktop notification trait and zbus adapter |
+| `src/resident.rs` | Windowless Rune daemon that opens the editor |
 | `src/document.rs` | Annotation document, ids, draw order, shared arrow geometry |
 | `src/editor.rs` | Editor state, Rune view, input handlers, copy and close |
 | `src/text.rs` | Parley shaping, swash outlines, tiny-skia text plus halo |
 | `src/render.rs` | The source-resolution annotation layer |
 | `src/export.rs` | Flatten and encode the PNG |
 | `src/clipboard.rs` | `ClipboardSink`, Rune clipboard, memory sink |
-| `src/cli.rs` | `--editor`, `--capture`, `--help` |
+| `src/cli.rs` | Modes: trigger, daemon, `--editor`, `--capture` |
+| `scripts/install.sh` | Install and uninstall |
 
 ## Not in this ticket
 
 No rectangle, ellipse, or redaction tools. No selection move or resize. No undo or redo. No
-save dialog. No daemon, socket, installer, or desktop acceptance run. The document and render
-seams keep stable ids, a kind enum, and draw order so those can be added without reshaping
-the editor.
+save dialog. The document and render seams keep stable ids, a kind enum, and draw order so
+those can be added without reshaping the editor.
