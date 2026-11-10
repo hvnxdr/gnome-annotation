@@ -88,6 +88,16 @@ fn drag(rt: &mut Runtime<Editor>, from: [f32; 2], to: [f32; 2]) -> bool {
     preview
 }
 
+fn click(rt: &mut Runtime<Editor>, at: [f32; 2]) {
+    let rect = canvas_rect(rt);
+    let image = rt.state.image_size();
+    let (x, y) = window_point(rect, at, image);
+    rt.pointer_down(x, y);
+    rt.frame(0.0);
+    rt.pointer_up(x, y);
+    rt.frame(0.0);
+}
+
 /// Press Enter, assert the editor closed, and decode the PNG the clipboard sink received.
 fn export(sink: &MemoryClipboardSink, rt: &mut Runtime<Editor>) -> RgbaImage {
     rt.key(enter());
@@ -264,6 +274,31 @@ fn redaction_is_opaque_black_with_no_outline() {
         just_outside,
         [72, 72, 72, 255],
         "redaction has no outline outside its rectangle"
+    );
+}
+
+#[test]
+fn a_click_without_a_drag_creates_no_annotation() {
+    let dir = TempDir::new("zero-size");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    for key in ["l", "a", "r", "o", "x"] {
+        rt.key(key_text(key));
+        rt.frame(0.0);
+        click(&mut rt, [800.0, 600.0]);
+        assert!(
+            rt.state.document().is_empty(),
+            "a click with tool {key} leaves no annotation"
+        );
+    }
+
+    let image = export(&sink, &mut rt);
+    assert!(
+        !image
+            .enumerate_pixels()
+            .any(|(_, _, px)| is_annotation_red(px.0)),
+        "the discarded clicks leave no pixels"
     );
 }
 
