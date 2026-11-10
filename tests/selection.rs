@@ -189,6 +189,14 @@ fn text_is_selected_by_its_ink_and_can_be_moved() {
         Some(id),
         "a click inside the text ink selects the label"
     );
+    assert!(
+        rt.presented("selection").is_some(),
+        "the label shows a selection outline"
+    );
+    assert!(
+        rt.presented("handle-0").is_none(),
+        "text has no resize handles"
+    );
 
     let rect = canvas_rect(&rt);
     let image = rt.state.image_size();
@@ -222,6 +230,71 @@ fn text_is_selected_by_its_ink_and_can_be_moved() {
     assert!(
         ink[0] >= 1250,
         "the label's ink moved right with its anchor: {ink:?}"
+    );
+}
+
+#[test]
+fn pressing_another_annotation_selects_and_moves_it_in_the_same_gesture() {
+    let dir = TempDir::new("move-other");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1000.0, 700.0]);
+    draw_rectangle(&mut rt, [1400.0, 1000.0], [1800.0, 1300.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [800.0, 550.0]);
+    let first = rt.state.document().annotations()[0].id;
+    assert_eq!(rt.state.selected(), Some(first));
+
+    let second = rt.state.document().annotations()[1].id;
+    drag(&mut rt, [1600.0, 1150.0], [1700.0, 1250.0]);
+
+    assert_eq!(
+        rt.state.selected(),
+        Some(second),
+        "the press selects the other annotation"
+    );
+    let annotations = rt.state.document().annotations();
+    let AnnotationKind::Rectangle { start, .. } = annotations[0].kind else {
+        panic!("expected a rectangle");
+    };
+    assert!(
+        (start[0] - 600.0).abs() < 1.0 && (start[1] - 400.0).abs() < 1.0,
+        "the previously selected rectangle stays put: {start:?}"
+    );
+    let AnnotationKind::Rectangle { start, .. } = annotations[1].kind else {
+        panic!("expected a rectangle");
+    };
+    assert!(
+        (start[0] - 1500.0).abs() < 1.0 && (start[1] - 1100.0).abs() < 1.0,
+        "the newly selected rectangle moves with the gesture: {start:?}"
+    );
+}
+
+#[test]
+fn a_resize_that_would_collapse_the_shape_is_discarded() {
+    let dir = TempDir::new("resize-minimum");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+    drag(&mut rt, [1200.0, 900.0], [600.0, 400.0]);
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Rectangle { start, end } = annotation.kind else {
+        panic!("expected a rectangle, got {:?}", annotation.kind);
+    };
+    assert!(
+        (start[0] - 600.0).abs() < 1.0 && (start[1] - 400.0).abs() < 1.0,
+        "the rectangle keeps its top-left: {start:?}"
+    );
+    assert!(
+        (end[0] - 1200.0).abs() < 1.0 && (end[1] - 900.0).abs() < 1.0,
+        "a zero-size resize is discarded: {end:?}"
     );
 }
 
