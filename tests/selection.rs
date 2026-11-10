@@ -164,6 +164,68 @@ fn dragging_a_selected_rectangle_moves_it() {
 }
 
 #[test]
+fn text_is_selected_by_its_ink_and_can_be_moved() {
+    let dir = TempDir::new("text-move");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("t"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 1200.0]);
+    rt.paste("Label");
+    rt.frame(0.0);
+    rt.key(KeyEvent {
+        key: Key::Enter,
+        mods: Mods::default(),
+    });
+    rt.frame(0.0);
+    let id = rt.state.document().annotations()[0].id;
+
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [950.0, 1230.0]);
+    assert_eq!(
+        rt.state.selected(),
+        Some(id),
+        "a click inside the text ink selects the label"
+    );
+
+    let rect = canvas_rect(&rt);
+    let image = rt.state.image_size();
+    let (x0, y0) = window_point(rect, [950.0, 1230.0], image);
+    let (x1, y1) = window_point(rect, [1350.0, 1330.0], image);
+    rt.pointer_down(x0, y0);
+    rt.frame(0.0);
+    rt.pointer_move(x1, y1);
+    rt.frame(0.0);
+    assert!(
+        rt.elements()
+            .iter()
+            .any(|element| element.key.as_deref() == Some("live-text")),
+        "the label's raster is previewed while dragging"
+    );
+    rt.pointer_up(x1, y1);
+    rt.frame(0.0);
+
+    let annotation = &rt.state.document().annotations()[0];
+    let AnnotationKind::Text { position, .. } = &annotation.kind else {
+        panic!("expected text, got {:?}", annotation.kind);
+    };
+    assert!(
+        (position[0] - 1300.0).abs() < 1.0 && (position[1] - 1300.0).abs() < 1.0,
+        "the text anchor moves by the drag delta: {position:?}"
+    );
+
+    let png = rt.state.export_png().expect("the export succeeds");
+    let image = decode_png(&png);
+    let ink = support::pixel_bounds(&image, is_annotation_red).expect("the label is exported");
+    assert!(
+        ink[0] >= 1250,
+        "the label's ink moved right with its anchor: {ink:?}"
+    );
+}
+
+#[test]
 fn delete_removes_the_selected_annotation_and_clears_the_selection() {
     let dir = TempDir::new("delete");
     let fixture = write_4k_fixture(dir.path());

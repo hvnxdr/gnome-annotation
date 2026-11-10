@@ -17,7 +17,7 @@ use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
 use crate::document::{
     Annotation, AnnotationKind, Document, MIN_DRAG_PX, PALETTE, Point, Rect, Rgba,
-    STROKE_WIDTHS_PT, arrow_geometry, crop_segment, ellipse_points, line_length,
+    STROKE_WIDTHS_PT, arrow_geometry, crop_segment, ellipse_points, line_length, point_in_rect,
 };
 use crate::export::{self, ExportError};
 use crate::render::render_annotations_excluding;
@@ -212,17 +212,40 @@ impl Editor {
     }
 
     /// The topmost annotation under `point`, in source-image pixels.
-    fn hit_test(&self, point: Point) -> Option<u64> {
+    fn hit_test(&mut self, point: Point) -> Option<u64> {
         let six_pt_px = 6.0 / self.fit_scale().max(f32::EPSILON);
-        self.document
-            .annotations()
-            .iter()
-            .rev()
-            .find(|annotation| {
-                let tolerance_px = (annotation.stroke_px / 2.0 + six_pt_px).max(six_pt_px);
-                annotation.hit_test(point, tolerance_px)
-            })
-            .map(|annotation| annotation.id)
+        let mut found = None;
+        for annotation in self.document.annotations().iter().rev() {
+            let hit = match &annotation.kind {
+                AnnotationKind::Text {
+                    position,
+                    text,
+                    size_px,
+                } => self
+                    .text_renderer
+                    .measure(text, *size_px)
+                    .is_some_and(|rect| {
+                        point_in_rect(
+                            point,
+                            Rect {
+                                x: position[0] + rect.x,
+                                y: position[1] + rect.y,
+                                w: rect.w,
+                                h: rect.h,
+                            },
+                        )
+                    }),
+                _ => {
+                    let tolerance_px = (annotation.stroke_px / 2.0 + six_pt_px).max(six_pt_px);
+                    annotation.hit_test(point, tolerance_px)
+                }
+            };
+            if hit {
+                found = Some(annotation.id);
+                break;
+            }
+        }
+        found
     }
 
     /// Points per source-image pixel at the current window size.
