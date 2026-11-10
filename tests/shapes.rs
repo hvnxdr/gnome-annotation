@@ -268,6 +268,41 @@ fn redaction_is_opaque_black_with_no_outline() {
 }
 
 #[test]
+fn a_later_redaction_covers_an_earlier_arrow() {
+    let dir = TempDir::new("z-order");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("a"));
+    rt.frame(0.0);
+    assert!(drag(&mut rt, [600.0, 400.0], [1800.0, 400.0]));
+
+    rt.key(key_text("x"));
+    rt.frame(0.0);
+    assert!(drag(&mut rt, [1000.0, 300.0], [1400.0, 500.0]));
+
+    let annotations = rt.state.document().annotations();
+    assert!(matches!(annotations[0].kind, AnnotationKind::Arrow { .. }));
+    assert!(matches!(
+        annotations[1].kind,
+        AnnotationKind::Redaction { .. }
+    ));
+
+    let image = export(&sink, &mut rt);
+    let arrow_visible = image.get_pixel(800, 400).0;
+    assert!(
+        is_annotation_red(arrow_visible),
+        "the arrow shows outside the redaction: {arrow_visible:?}"
+    );
+    let covered = image.get_pixel(1200, 400).0;
+    assert_eq!(
+        covered,
+        [0, 0, 0, 255],
+        "the later redaction paints above the earlier arrow"
+    );
+}
+
+#[test]
 fn drags_past_the_image_edge_are_cropped_to_the_capture() {
     let dir = TempDir::new("clipping");
     let fixture = write_4k_fixture(dir.path());

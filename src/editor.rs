@@ -603,6 +603,7 @@ pub fn editor_view(editor: &Editor, cx: &mut Cx<Editor>) -> El {
         canvas_el = canvas_el.child(
             el().key("annotations")
                 .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .clip_rounded(0.0)
                 .pixels(image.pixels()),
         );
     }
