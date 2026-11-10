@@ -10,7 +10,8 @@ mod support;
 
 use support::TempDir;
 
-const OUR_PATH: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/gnome-annotation/";
+const OUR_PATH: &str =
+    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/gnome-annotation/";
 const CUSTOM0: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/";
 
 struct Installer {

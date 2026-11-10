@@ -16,7 +16,9 @@ use gnome_annotation::ipc::{IpcError, Reply, SocketServer, TriggerClient, Trigge
 use support::TempDir;
 use support::fakes::{FakePortal, RecordingHost, RecordingNotifier};
 
-fn daemon(outcomes: Vec<Result<CaptureOutcome, CaptureError>>) -> (Arc<Daemon>, Arc<RecordingHost>) {
+fn daemon(
+    outcomes: Vec<Result<CaptureOutcome, CaptureError>>,
+) -> (Arc<Daemon>, Arc<RecordingHost>) {
     let host = Arc::new(RecordingHost::default());
     let daemon = Arc::new(Daemon::new(
         Arc::new(FakePortal::new(outcomes)),
@@ -158,7 +160,8 @@ fn a_capture_command_while_a_capture_is_in_flight_reports_busy() {
 
     *gate.open.lock().unwrap() = true;
     gate.ready.notify_all();
-    assert!(wait_until(Duration::from_secs(2), || !host.opened().is_empty()));
+    let opened = || !host.opened().is_empty();
+    assert!(wait_until(Duration::from_secs(2), opened));
     assert_eq!(host.opened(), [PathBuf::from("/tmp/gated.png")]);
 }
 
@@ -173,7 +176,9 @@ fn the_trigger_client_reports_acceptance_from_a_running_daemon() {
 
     let client = TriggerClient::new(socket, PathBuf::from("/nonexistent/gnome-annotation"));
     assert_eq!(client.run().unwrap(), Reply::Accepted);
-    assert!(wait_until(Duration::from_secs(2), || !host.opened().is_empty()));
+    assert!(wait_until(Duration::from_secs(2), || !host
+        .opened()
+        .is_empty()));
 }
 
 #[test]

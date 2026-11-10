@@ -134,16 +134,10 @@ fn no_arguments_triggers_the_daemon() {
     let (_seen, launch) = recorder();
     let portal = FakePortal(Ok(CaptureOutcome::Cancelled));
     let mut triggered = false;
-    let code = run_with(
-        Vec::<String>::new(),
-        &portal,
-        launch,
-        unused_daemon,
-        || {
-            triggered = true;
-            Ok(())
-        },
-    );
+    let code = run_with(Vec::<String>::new(), &portal, launch, unused_daemon, || {
+        triggered = true;
+        Ok(())
+    });
     assert_eq!(code, 0);
     assert!(triggered);
 }
@@ -171,12 +165,8 @@ fn daemon_mode_runs_the_daemon() {
 fn a_trigger_failure_exits_non_zero() {
     let (_seen, launch) = recorder();
     let portal = FakePortal(Ok(CaptureOutcome::Cancelled));
-    let code = run_with(
-        Vec::<String>::new(),
-        &portal,
-        launch,
-        unused_daemon,
-        || Err("cannot reach the daemon".into()),
-    );
+    let code = run_with(Vec::<String>::new(), &portal, launch, unused_daemon, || {
+        Err("cannot reach the daemon".into())
+    });
     assert_eq!(code, 1);
 }

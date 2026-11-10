@@ -77,8 +77,13 @@ fn an_open_editor_draws_the_shared_view() {
     let dir = TempDir::new("daemon-view");
     let fixture = write_4k_fixture(dir.path());
     let rt = runtime(open_slot(&fixture));
-    let (canvas, _) = rt.presented("canvas").expect("the editor canvas is laid out");
-    assert!(canvas[2] < 3840.0 && canvas[3] < 2160.0, "fitted: {canvas:?}");
+    let (canvas, _) = rt
+        .presented("canvas")
+        .expect("the editor canvas is laid out");
+    assert!(
+        canvas[2] < 3840.0 && canvas[3] < 2160.0,
+        "fitted: {canvas:?}"
+    );
     assert!(rt.find("tool-arrow").is_some());
 }
 

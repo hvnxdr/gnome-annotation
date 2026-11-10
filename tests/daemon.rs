@@ -6,24 +6,22 @@ mod support;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gnome_annotation::capture::CaptureOutcome;
+use gnome_annotation::capture::{CaptureError, CaptureOutcome};
 use gnome_annotation::daemon::{Daemon, TriggerOutcome};
 use support::fakes::{FakePortal, RecordingHost, RecordingNotifier};
 
-fn daemon(outcomes: Vec<Result<CaptureOutcome, gnome_annotation::capture::CaptureError>>) -> (
+type TestDaemon = (
     Arc<Daemon>,
     Arc<FakePortal>,
     Arc<RecordingNotifier>,
     Arc<RecordingHost>,
-) {
+);
+
+fn daemon(outcomes: Vec<Result<CaptureOutcome, CaptureError>>) -> TestDaemon {
     let portal = Arc::new(FakePortal::new(outcomes));
     let notifier = Arc::new(RecordingNotifier::default());
     let host = Arc::new(RecordingHost::default());
-    let daemon = Arc::new(Daemon::new(
-        portal.clone(),
-        notifier.clone(),
-        host.clone(),
-    ));
+    let daemon = Arc::new(Daemon::new(portal.clone(), notifier.clone(), host.clone()));
     (daemon, portal, notifier, host)
 }
 
@@ -54,8 +52,6 @@ fn a_cancelled_capture_opens_no_editor() {
 
 #[test]
 fn a_portal_failure_notifies_and_stays_idle() {
-    use gnome_annotation::capture::{CaptureError, CaptureOutcome};
-
     let (daemon, portal, notifier, host) = daemon(vec![
         Err(CaptureError("no screenshot portal".into())),
         Ok(CaptureOutcome::Captured(PathBuf::from("/tmp/retry.png"))),

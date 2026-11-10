@@ -13,8 +13,8 @@ use crate::capture::PortalScreenshot;
 use crate::clipboard::{ClipboardSink, RuneClipboard};
 use crate::daemon::{CaptureHost, Daemon};
 use crate::editor::{
-    APP_ID, APP_TITLE, DEFAULT_WINDOW, Editor, EditorOptions, HostsEditor, MIN_WINDOW, editor_on_key,
-    editor_view,
+    APP_ID, APP_TITLE, DEFAULT_WINDOW, Editor, EditorOptions, HostsEditor, MIN_WINDOW,
+    editor_on_key, editor_view,
 };
 use crate::ipc::{IpcError, SocketServer, TriggerClient, socket_path};
 use crate::notify::DbusNotifier;
@@ -115,9 +115,7 @@ pub fn run_daemon() -> Result<(), String> {
     spec.setup = Some(daemon_setup);
     spec.on_key = Some(daemon_on_key);
 
-    let app = rune::App::new(spec)
-        .windowless()
-        .on_close(daemon_on_close);
+    let app = rune::App::new(spec).windowless().on_close(daemon_on_close);
     let host = Arc::new(RuneHost {
         handle: app.handle(),
         clipboard: Arc::new(RuneClipboard),

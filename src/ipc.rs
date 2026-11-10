@@ -10,8 +10,8 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -35,7 +35,9 @@ pub enum IpcError {
 impl std::fmt::Display for IpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AlreadyRunning => f.write_str("another gnome-annotation daemon is already running"),
+            Self::AlreadyRunning => {
+                f.write_str("another gnome-annotation daemon is already running")
+            }
             Self::InvalidPath(path) => write!(f, "{} has no parent directory", path.display()),
             Self::Path { path, error } => write!(f, "cannot use {}: {error}", path.display()),
             Self::Io(error) => write!(f, "{error}"),
@@ -52,9 +54,7 @@ pub fn runtime_dir() -> PathBuf {
     {
         return PathBuf::from(dir);
     }
-    let dir = std::env::temp_dir().join(format!("gnome-annotation-{}", unsafe {
-        libc::getuid()
-    }));
+    let dir = std::env::temp_dir().join(format!("gnome-annotation-{}", unsafe { libc::getuid() }));
     let _ = fs::create_dir_all(&dir);
     let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
     dir
@@ -290,7 +290,8 @@ impl TriggerClient {
 }
 
 fn send(socket: &Path) -> Result<Reply, SendError> {
-    let mut stream = UnixStream::connect(socket).map_err(|error| SendError::Unreachable(error.to_string()))?;
+    let mut stream =
+        UnixStream::connect(socket).map_err(|error| SendError::Unreachable(error.to_string()))?;
     stream
         .set_read_timeout(Some(CONNECTION_TIMEOUT))
         .map_err(|error| SendError::Unreachable(error.to_string()))?;
