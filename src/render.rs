@@ -58,6 +58,9 @@ pub fn render_annotations(
                     annotation.stroke_px,
                 );
             }
+            AnnotationKind::Redaction { start, end } => {
+                draw_redaction(&mut pixmap, Rect::normalized(*start, *end));
+            }
             AnnotationKind::Text {
                 position,
                 text: value,
@@ -92,6 +95,33 @@ fn draw_line(pixmap: &mut Pixmap, start: [f32; 2], end: [f32; 2], color: Rgba, s
 
 fn draw_rect(pixmap: &mut Pixmap, rect: Rect, color: Rgba, stroke_px: f32) {
     draw_polyline(pixmap, &rect.corners(), true, color, stroke_px);
+}
+
+/// Opaque black with no outline. The annotation's colour and width are ignored.
+fn draw_redaction(pixmap: &mut Pixmap, rect: Rect) {
+    let mut paint = Paint::default();
+    paint.set_color(skia_color(Rgba::BLACK));
+    paint.anti_alias = true;
+
+    let mut path = PathBuilder::new();
+    for (index, point) in rect.corners().iter().enumerate() {
+        if index == 0 {
+            path.move_to(point[0], point[1]);
+        } else {
+            path.line_to(point[0], point[1]);
+        }
+    }
+    path.close();
+    let Some(path) = path.finish() else {
+        return;
+    };
+    pixmap.fill_path(
+        &path,
+        &paint,
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
 }
 
 fn draw_polyline(pixmap: &mut Pixmap, points: &[Point], closed: bool, color: Rgba, stroke_px: f32) {

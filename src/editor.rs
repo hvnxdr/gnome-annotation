@@ -286,12 +286,24 @@ impl Editor {
                     end: [rect.x + rect.w, rect.y + rect.h],
                 })
             }
-            Tool::Select | Tool::Redaction | Tool::Text => None,
+            Tool::Redaction => {
+                let rect = Rect::normalized(draft.start, draft.end);
+                (!rect.is_too_small()).then_some(AnnotationKind::Redaction {
+                    start: [rect.x, rect.y],
+                    end: [rect.x + rect.w, rect.y + rect.h],
+                })
+            }
+            Tool::Select | Tool::Text => None,
         };
         let Some(kind) = kind else {
             return;
         };
-        self.document.push(kind, self.color, self.stroke_px);
+        let (color, stroke_px) = if matches!(kind, AnnotationKind::Redaction { .. }) {
+            (Rgba::BLACK, 0.0)
+        } else {
+            (self.color, self.stroke_px)
+        };
+        self.document.push(kind, color, stroke_px);
         self.rebuild_overlay();
     }
 
@@ -470,7 +482,13 @@ fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
                 )
             })
         }
-        Tool::Select | Tool::Redaction | Tool::Text => None,
+        Tool::Redaction => {
+            let rect = Rect::normalized(draft.start, draft.end);
+            (!rect.is_too_small()).then(|| {
+                Shape::new().fill(rect.corners().map(to_pt).to_vec(), rune_color(Rgba::BLACK))
+            })
+        }
+        Tool::Select | Tool::Text => None,
     }
 }
 

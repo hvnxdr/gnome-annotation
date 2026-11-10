@@ -66,6 +66,13 @@ pub struct Rgba {
 }
 
 impl Rgba {
+    pub const BLACK: Self = Self {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+
     pub const ANNOTATION_RED: Self = Self {
         r: 224,
         g: 27,
@@ -115,6 +122,10 @@ pub enum AnnotationKind {
         end: Point,
     },
     Ellipse {
+        start: Point,
+        end: Point,
+    },
+    Redaction {
         start: Point,
         end: Point,
     },

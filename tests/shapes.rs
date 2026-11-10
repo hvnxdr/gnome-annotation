@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
 use gnome_annotation::clipboard::MemoryClipboardSink;
-use gnome_annotation::document::AnnotationKind;
+use gnome_annotation::document::{AnnotationKind, Rgba};
 use gnome_annotation::editor::{Editor, EditorOptions, Tool, editor_on_key, editor_view};
 use image::RgbaImage;
 use rune::edit::{Key, KeyEvent, Mods};
@@ -220,5 +220,41 @@ fn ellipse_is_drawn_inside_its_bounding_box_and_exported() {
         centre,
         [36, 36, 36, 255],
         "the ellipse is an outline, not a fill"
+    );
+}
+
+#[test]
+fn redaction_is_opaque_black_with_no_outline() {
+    let dir = TempDir::new("redaction");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("x"));
+    rt.frame(0.0);
+    assert!(
+        drag(&mut rt, [600.0, 400.0], [1200.0, 900.0]),
+        "the redaction is previewed while dragging"
+    );
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(annotations.len(), 1);
+    assert!(
+        matches!(annotations[0].kind, AnnotationKind::Redaction { .. }),
+        "expected a redaction, got {:?}",
+        annotations[0].kind
+    );
+    assert_eq!(annotations[0].color, Rgba::BLACK);
+    assert_eq!(annotations[0].stroke_px, 0.0);
+
+    let image = export(&sink, &mut rt);
+    let corner = image.get_pixel(610, 410).0;
+    assert_eq!(corner, [0, 0, 0, 255], "redaction fills opaque black");
+    let centre = image.get_pixel(900, 650).0;
+    assert_eq!(centre, [0, 0, 0, 255], "redaction is opaque");
+    let just_outside = image.get_pixel(1205, 650).0;
+    assert_eq!(
+        just_outside,
+        [72, 72, 72, 255],
+        "redaction has no outline outside its rectangle"
     );
 }
