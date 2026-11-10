@@ -247,6 +247,9 @@ fn redaction_is_opaque_black_with_no_outline() {
     let fixture = write_4k_fixture(dir.path());
     let (sink, mut rt) = headless_editor(&fixture);
 
+    // Redaction ignores the selected colour and width.
+    press(&mut rt, "color-4");
+    press(&mut rt, "width-2");
     rt.key(key_text("x"));
     rt.frame(0.0);
     assert!(
