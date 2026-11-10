@@ -284,6 +284,46 @@ impl Document {
     }
 }
 
+impl Annotation {
+    /// Whether `point` lands on this annotation, using `tolerance_px` for thin strokes.
+    pub fn hit_test(&self, point: Point, tolerance_px: f32) -> bool {
+        self.kind.hit_test(point, tolerance_px)
+    }
+}
+
+impl AnnotationKind {
+    /// Whether `point` lands on this kind. Lines and arrows are hit by distance to the
+    /// segment so a thin mark is easy to grab; boxes are hit by their interior.
+    pub fn hit_test(&self, point: Point, _tolerance_px: f32) -> bool {
+        match self {
+            Self::Line { .. } | Self::Arrow { .. } => false,
+            Self::Rectangle { start, end } | Self::Redaction { start, end } => {
+                point_in_rect(point, Rect::normalized(*start, *end))
+            }
+            Self::Ellipse { start, end } => {
+                let rect = Rect::normalized(*start, *end);
+                if rect.w <= 0.0 || rect.h <= 0.0 {
+                    return false;
+                }
+                let rx = rect.w / 2.0;
+                let ry = rect.h / 2.0;
+                let dx = (point[0] - (rect.x + rx)) / rx;
+                let dy = (point[1] - (rect.y + ry)) / ry;
+                dx * dx + dy * dy <= 1.0
+            }
+            Self::Text { .. } => false,
+        }
+    }
+}
+
+/// Whether `point` is inside `rect`, including its edges.
+pub fn point_in_rect(point: Point, rect: Rect) -> bool {
+    point[0] >= rect.x
+        && point[0] <= rect.x + rect.w
+        && point[1] >= rect.y
+        && point[1] <= rect.y + rect.h
+}
+
 /// The arrow's shared geometry in source-image pixels. The preview and the exporter both use it.
 #[derive(Clone, Copy, Debug)]
 pub struct ArrowGeometry {

@@ -88,6 +88,7 @@ pub struct Editor {
     image: Option<rune::Image>,
     cache: Option<ImageCache>,
     document: Document,
+    selected: Option<u64>,
     tool: Tool,
     draft: Option<Draft>,
     editing: Option<Editing>,
@@ -120,6 +121,7 @@ impl Editor {
             image: None,
             cache: None,
             document: Document::new(),
+            selected: None,
             tool: Tool::Select,
             draft: None,
             editing: None,
@@ -164,6 +166,22 @@ impl Editor {
 
     pub fn document(&self) -> &Document {
         &self.document
+    }
+
+    /// The selected annotation's id, if any.
+    pub fn selected(&self) -> Option<u64> {
+        self.selected
+    }
+
+    /// The topmost annotation under `point`, in source-image pixels.
+    fn hit_test(&self, point: Point) -> Option<u64> {
+        let tolerance_px = 6.0 / self.fit_scale().max(f32::EPSILON);
+        self.document
+            .annotations()
+            .iter()
+            .rev()
+            .find(|annotation| annotation.hit_test(point, tolerance_px))
+            .map(|annotation| annotation.id)
     }
 
     /// Points per source-image pixel at the current window size.
@@ -363,7 +381,12 @@ impl Editor {
 
     fn on_canvas_drag(&mut self, drag: &Drag) {
         match self.tool {
-            Tool::Select => {}
+            Tool::Select => {
+                if drag.phase == Phase::Down {
+                    let point = self.drag_point(drag);
+                    self.selected = self.hit_test(point);
+                }
+            }
             Tool::Line | Tool::Arrow | Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {
                 let tool = self.tool;
                 let point = self.drag_point(drag);
