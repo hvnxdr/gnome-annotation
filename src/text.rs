@@ -1,6 +1,7 @@
 //! Annotation text: shape with Parley, take outlines from swash, rasterise the fill and its
 //! halo with tiny-skia. The preview and the export use these exact pixels.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parley::fontique::{Blob, Collection, CollectionOptions, SourceCache};
@@ -16,7 +17,7 @@ use tiny_skia::{
 };
 
 use crate::assets::{ADWAITA_SANS, ANNOTATION_FAMILY};
-use crate::document::Rgba;
+use crate::document::{Rect, Rgba};
 
 /// One shaped and rasterised string. `offset` is the raster's top-left relative to the text
 /// annotation's anchor, in source-image pixels.
@@ -29,6 +30,8 @@ pub struct TextRenderer {
     font_cx: FontContext,
     layout_cx: LayoutContext<()>,
     scale_cx: ScaleContext,
+    /// Ink bounds relative to the anchor, keyed by text and `size_px` bits.
+    measure_cache: HashMap<(String, u32), Option<Rect>>,
 }
 
 impl Default for TextRenderer {
@@ -52,7 +55,25 @@ impl TextRenderer {
             font_cx,
             layout_cx: LayoutContext::new(),
             scale_cx: ScaleContext::new(),
+            measure_cache: HashMap::new(),
         }
+    }
+
+    /// The ink plus halo bounds relative to the text anchor, in source-image pixels. Cached by
+    /// text and size so hit testing and the selection outline never rasterise per pointer move.
+    pub fn measure(&mut self, text: &str, size_px: f32) -> Option<Rect> {
+        if text.is_empty() || !size_px.is_finite() || size_px <= 0.0 {
+            return None;
+        }
+        let key = (text.to_owned(), size_px.to_bits());
+        if let Some(cached) = self.measure_cache.get(&key) {
+            return *cached;
+        }
+        let measured = self
+            .outline(text, size_px)
+            .and_then(|path| raster_bounds(&path, size_px));
+        self.measure_cache.insert(key, measured);
+        measured
     }
 
     /// Shape `text` and return a haloed RGBA raster at source-image pixels.
@@ -61,16 +82,12 @@ impl TextRenderer {
             return None;
         }
         let path = self.outline(text, size_px)?;
-        let bounds = path.bounds();
-        if !bounds.width().is_finite() || !bounds.height().is_finite() {
-            return None;
-        }
+        let bounds = raster_bounds(&path, size_px)?;
         let halo = (size_px * 0.07).clamp(1.0, 8.0);
-        let pad = halo + 1.0;
-        let left = bounds.left().floor() - pad;
-        let top = bounds.top().floor() - pad;
-        let width = (bounds.right().ceil() + pad - left).max(1.0) as u32;
-        let height = (bounds.bottom().ceil() + pad - top).max(1.0) as u32;
+        let left = bounds.x;
+        let top = bounds.y;
+        let width = bounds.w.max(1.0) as u32;
+        let height = bounds.h.max(1.0) as u32;
         let mut pixmap = Pixmap::new(width, height)?;
         let placed = path.transform(Transform::from_translate(-left, -top))?;
 
@@ -175,4 +192,22 @@ impl TextRenderer {
         }
         if !any { None } else { path.finish() }
     }
+}
+
+/// The raster's rect relative to the anchor: the outline bounds plus the halo's padding.
+fn raster_bounds(path: &Path, size_px: f32) -> Option<Rect> {
+    let bounds = path.bounds();
+    if !bounds.width().is_finite() || !bounds.height().is_finite() {
+        return None;
+    }
+    let halo = (size_px * 0.07).clamp(1.0, 8.0);
+    let pad = halo + 1.0;
+    let x = bounds.left().floor() - pad;
+    let y = bounds.top().floor() - pad;
+    Some(Rect {
+        x,
+        y,
+        w: (bounds.right().ceil() + pad - x).max(1.0),
+        h: (bounds.bottom().ceil() + pad - y).max(1.0),
+    })
 }

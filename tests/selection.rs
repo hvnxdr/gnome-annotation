@@ -164,6 +164,41 @@ fn dragging_a_selected_rectangle_moves_it() {
 }
 
 #[test]
+fn selection_chrome_is_visible_and_never_exported() {
+    let dir = TempDir::new("chrome");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    draw_rectangle(&mut rt, [600.0, 400.0], [1200.0, 900.0]);
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 650.0]);
+
+    assert!(
+        rt.presented("selection").is_some(),
+        "the selection layer is on screen"
+    );
+    for handle in 0..4 {
+        assert!(
+            rt.presented(&format!("handle-{handle}")).is_some(),
+            "rectangle handle {handle} is on screen"
+        );
+    }
+    let with_chrome = rt.state.export_png().expect("the export succeeds");
+
+    click(&mut rt, [3000.0, 1800.0]);
+    assert!(
+        rt.presented("selection").is_none(),
+        "clearing the selection drops the chrome"
+    );
+    let without_chrome = rt.state.export_png().expect("the export succeeds");
+    assert_eq!(
+        with_chrome, without_chrome,
+        "the selection chrome never enters the exported PNG"
+    );
+}
+
+#[test]
 fn dragging_a_corner_handle_resizes_a_rectangle() {
     let dir = TempDir::new("resize-rect");
     let fixture = write_4k_fixture(dir.path());

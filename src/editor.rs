@@ -29,6 +29,9 @@ pub const APP_TITLE: &str = "gnome-annotation";
 pub const DEFAULT_WINDOW: (f32, f32) = (1200.0, 800.0);
 pub const MIN_WINDOW: (f32, f32) = (640.0, 480.0);
 
+/// Selection handles are square, in screen points.
+const HANDLE_SIZE_PT: f32 = 8.0;
+
 pub struct EditorOptions {
     pub image_path: PathBuf,
     pub clipboard: Arc<dyn ClipboardSink>,
@@ -107,6 +110,12 @@ struct Overlay {
     image: Option<rune::Image>,
 }
 
+/// The selected annotation's outline and handles, in source-image pixels.
+struct Chrome {
+    bounds: Rect,
+    handles: Vec<Point>,
+}
+
 pub struct Editor {
     source: SourceImage,
     source_pixmap: tiny_skia::Pixmap,
@@ -115,6 +124,7 @@ pub struct Editor {
     document: Document,
     selected: Option<u64>,
     gesture: Option<Gesture>,
+    chrome: Option<Chrome>,
     tool: Tool,
     draft: Option<Draft>,
     editing: Option<Editing>,
@@ -149,6 +159,7 @@ impl Editor {
             document: Document::new(),
             selected: None,
             gesture: None,
+            chrome: None,
             tool: Tool::Select,
             draft: None,
             editing: None,
@@ -441,6 +452,67 @@ impl Editor {
             .position(|handle| line_length(*handle, point) <= tolerance_px)
     }
 
+    /// The annotation the selection refers to, at its live geometry during a gesture.
+    fn live_annotation(&self) -> Option<&Annotation> {
+        if let Some(gesture) = &self.gesture {
+            return Some(&gesture.live);
+        }
+        self.selected.and_then(|id| self.document.get(id))
+    }
+
+    fn chrome_for(&mut self, annotation: &Annotation) -> Option<Chrome> {
+        let padding = (annotation.stroke_px * 0.5).max(1.0);
+        match &annotation.kind {
+            AnnotationKind::Text {
+                position,
+                text,
+                size_px,
+            } => {
+                let rect = self.text_renderer.measure(text, *size_px)?;
+                Some(Chrome {
+                    bounds: Rect {
+                        x: position[0] + rect.x,
+                        y: position[1] + rect.y,
+                        w: rect.w,
+                        h: rect.h,
+                    },
+                    handles: Vec::new(),
+                })
+            }
+            AnnotationKind::Line { start, end } => Some(Chrome {
+                bounds: inflate_rect(Rect::normalized(*start, *end), padding),
+                handles: vec![*start, *end],
+            }),
+            AnnotationKind::Arrow { start, end } => {
+                let mut points = vec![*start, *end];
+                if let Some(geometry) = arrow_geometry(*start, *end, annotation.stroke_px) {
+                    points.extend(geometry.head);
+                }
+                Some(Chrome {
+                    bounds: inflate_rect(points_bounds(&points)?, padding),
+                    handles: vec![*start, *end],
+                })
+            }
+            AnnotationKind::Rectangle { start, end }
+            | AnnotationKind::Ellipse { start, end }
+            | AnnotationKind::Redaction { start, end } => {
+                let rect = Rect::normalized(*start, *end);
+                Some(Chrome {
+                    bounds: inflate_rect(rect, padding),
+                    handles: rect.corners().to_vec(),
+                })
+            }
+        }
+    }
+
+    fn refresh_chrome(&mut self) {
+        let Some(annotation) = self.live_annotation().cloned() else {
+            self.chrome = None;
+            return;
+        };
+        self.chrome = self.chrome_for(&annotation);
+    }
+
     fn begin_select(&mut self, point: Point) {
         let selected = self.selected.and_then(|id| self.document.get(id)).cloned();
         if let Some(annotation) = selected
@@ -452,6 +524,7 @@ impl Editor {
         let Some(id) = self.hit_test(point) else {
             self.selected = None;
             self.gesture = None;
+            self.chrome = None;
             return;
         };
         self.selected = Some(id);
@@ -482,6 +555,7 @@ impl Editor {
             text,
         });
         self.rebuild_overlay_excluding(Some(id));
+        self.refresh_chrome();
     }
 
     fn move_gesture(&mut self, point: Point) {
@@ -499,6 +573,7 @@ impl Editor {
         if let Some(kind) = next {
             gesture.live.kind = kind;
         }
+        self.refresh_chrome();
     }
 
     fn finish_gesture(&mut self, cancelled: bool) {
@@ -509,6 +584,7 @@ impl Editor {
             self.document.set_kind(gesture.id, gesture.live.kind);
         }
         self.rebuild_overlay();
+        self.refresh_chrome();
     }
 
     fn on_canvas_drag(&mut self, drag: &Drag) {
@@ -619,6 +695,32 @@ fn rune_color(color: Rgba) -> Color {
         b: decode(color.b),
         a: f32::from(color.a) / 255.0,
     }
+}
+
+fn inflate_rect(rect: Rect, padding: f32) -> Rect {
+    Rect {
+        x: rect.x - padding,
+        y: rect.y - padding,
+        w: rect.w + padding * 2.0,
+        h: rect.h + padding * 2.0,
+    }
+}
+
+fn points_bounds(points: &[Point]) -> Option<Rect> {
+    let first = *points.first()?;
+    let (mut x0, mut y0, mut x1, mut y1) = (first[0], first[1], first[0], first[1]);
+    for point in points {
+        x0 = x0.min(point[0]);
+        y0 = y0.min(point[1]);
+        x1 = x1.max(point[0]);
+        y1 = y1.max(point[1]);
+    }
+    Some(Rect {
+        x: x0,
+        y: y0,
+        w: x1 - x0,
+        h: y1 - y0,
+    })
 }
 
 /// The in-flight draft in screen points, built from the same geometry the exporter uses.
@@ -921,6 +1023,45 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
             if painted {
                 canvas_el = canvas_el.child(layer);
             }
+        }
+    }
+    if let Some(chrome) = &editor.chrome {
+        let scale = editor.fit_scale();
+        if scale > 0.0 {
+            let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
+            let mut layer = el()
+                .key("selection")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .clip_rounded(0.0)
+                .inert();
+            if chrome.bounds.w > 0.0 && chrome.bounds.h > 0.0 {
+                let outline = Shape::new().stroke_with(
+                    chrome.bounds.corners().map(to_pt).to_vec(),
+                    true,
+                    1.0,
+                    LineCap::Round,
+                    accent,
+                );
+                layer = layer.child(
+                    canvas(outline)
+                        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                        .clip_rounded(0.0),
+                );
+            }
+            for (index, handle) in chrome.handles.iter().enumerate() {
+                layer = layer.child(
+                    el().key(format!("handle-{index}"))
+                        .absolute(
+                            handle[0] * scale - HANDLE_SIZE_PT / 2.0,
+                            handle[1] * scale - HANDLE_SIZE_PT / 2.0,
+                        )
+                        .size(HANDLE_SIZE_PT, HANDLE_SIZE_PT)
+                        .radius(1.0)
+                        .fill(Color::WHITE)
+                        .border(1.0, accent),
+                );
+            }
+            canvas_el = canvas_el.child(layer);
         }
     }
     if let Some(editing) = &editor.editing {
