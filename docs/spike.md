@@ -132,8 +132,9 @@ app.
   fraction of a point while the font is screen-scaled.
 - `--capture` is one-shot. HVN-30 adds the resident daemon, socket, trigger client, and
   autostart beside it; the one-shot mode stays for manual testing.
-- The toolbar is minimal: Select, Arrow, Text, and Copy. Select has no move, resize, or
-  delete yet. Undo, redo, save, and the rest of the palette are later tickets.
+- The toolbar is minimal. HVN-29 shipped Select, Arrow, Text, and Copy; HVN-31 adds Line,
+  Rectangle, Ellipse, Redaction, six colours, and three stroke widths. Select has no move,
+  resize, or delete yet. Undo, redo, and save are later tickets.
 - The editor keeps the source RGBA bytes, a premultiplied source pixmap, and a full-size
   annotation layer while annotations exist. A 4K capture peaks around 100 MB. This is
   acceptable for the gate; tiling or dirty-region rendering is a later optimisation.

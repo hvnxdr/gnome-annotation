@@ -5,7 +5,9 @@ use tiny_skia::{
     Color, FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, PixmapPaint, Stroke, Transform,
 };
 
-use crate::document::{AnnotationKind, Document, Rgba, arrow_geometry};
+use crate::document::{
+    AnnotationKind, Document, Point, Rect, Rgba, arrow_geometry, ellipse_points,
+};
 use crate::text::TextRenderer;
 
 pub fn render_annotations(
@@ -20,6 +22,15 @@ pub fn render_annotations(
     let mut pixmap = Pixmap::new(width, height)?;
     for annotation in document.annotations() {
         match &annotation.kind {
+            AnnotationKind::Line { start, end } => {
+                draw_line(
+                    &mut pixmap,
+                    *start,
+                    *end,
+                    annotation.color,
+                    annotation.stroke_px,
+                );
+            }
             AnnotationKind::Arrow { start, end } => {
                 draw_arrow(
                     &mut pixmap,
@@ -28,6 +39,27 @@ pub fn render_annotations(
                     annotation.color,
                     annotation.stroke_px,
                 );
+            }
+            AnnotationKind::Rectangle { start, end } => {
+                draw_rect(
+                    &mut pixmap,
+                    Rect::normalized(*start, *end),
+                    annotation.color,
+                    annotation.stroke_px,
+                );
+            }
+            AnnotationKind::Ellipse { start, end } => {
+                let rect = Rect::normalized(*start, *end);
+                draw_polyline(
+                    &mut pixmap,
+                    &ellipse_points(rect),
+                    true,
+                    annotation.color,
+                    annotation.stroke_px,
+                );
+            }
+            AnnotationKind::Redaction { start, end } => {
+                draw_redaction(&mut pixmap, Rect::normalized(*start, *end));
             }
             AnnotationKind::Text {
                 position,
@@ -55,6 +87,69 @@ pub fn render_annotations(
 
 fn skia_color(color: Rgba) -> Color {
     Color::from_rgba8(color.r, color.g, color.b, color.a)
+}
+
+fn draw_line(pixmap: &mut Pixmap, start: [f32; 2], end: [f32; 2], color: Rgba, stroke_px: f32) {
+    draw_polyline(pixmap, &[start, end], false, color, stroke_px);
+}
+
+fn draw_rect(pixmap: &mut Pixmap, rect: Rect, color: Rgba, stroke_px: f32) {
+    draw_polyline(pixmap, &rect.corners(), true, color, stroke_px);
+}
+
+/// Opaque black with no outline. The annotation's colour and width are ignored.
+fn draw_redaction(pixmap: &mut Pixmap, rect: Rect) {
+    let mut paint = Paint::default();
+    paint.set_color(skia_color(Rgba::BLACK));
+    paint.anti_alias = true;
+
+    let mut path = PathBuilder::new();
+    for (index, point) in rect.corners().iter().enumerate() {
+        if index == 0 {
+            path.move_to(point[0], point[1]);
+        } else {
+            path.line_to(point[0], point[1]);
+        }
+    }
+    path.close();
+    let Some(path) = path.finish() else {
+        return;
+    };
+    pixmap.fill_path(
+        &path,
+        &paint,
+        FillRule::Winding,
+        Transform::identity(),
+        None,
+    );
+}
+
+fn draw_polyline(pixmap: &mut Pixmap, points: &[Point], closed: bool, color: Rgba, stroke_px: f32) {
+    let Some((first, rest)) = points.split_first() else {
+        return;
+    };
+    let mut paint = Paint::default();
+    paint.set_color(skia_color(color));
+    paint.anti_alias = true;
+
+    let mut path = PathBuilder::new();
+    path.move_to(first[0], first[1]);
+    for point in rest {
+        path.line_to(point[0], point[1]);
+    }
+    if closed {
+        path.close();
+    }
+    let Some(path) = path.finish() else {
+        return;
+    };
+    let stroke = Stroke {
+        width: stroke_px.max(1.0),
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        ..Stroke::default()
+    };
+    pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
 }
 
 fn draw_arrow(pixmap: &mut Pixmap, start: [f32; 2], end: [f32; 2], color: Rgba, stroke_px: f32) {

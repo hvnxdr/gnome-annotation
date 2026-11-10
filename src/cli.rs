@@ -20,7 +20,11 @@ The installer binds Print to the trigger and adds the daemon to autostart.
 
 In the editor:
   V  select tool
+  L  line tool
   A  arrow tool
+  R  rectangle tool
+  O  ellipse tool
+  X  redaction tool
   T  text tool
   Enter  copy the annotated PNG at source resolution and close
   Esc    close without writing anything

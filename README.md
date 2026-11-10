@@ -4,8 +4,9 @@ Annotate a screenshot from GNOME's own screenshot UI and copy the result at sour
 resolution.
 
 This is the v1 build after the framework gate. It has the resident daemon and Print
-trigger, the capture path, the editor window, arrow and text annotations, PNG export, and
-a clipboard seam. The palette, selection, undo, and save dialog come later.
+trigger, the capture path, the editor window, line, arrow, rectangle, ellipse, redaction, and
+text annotations, six colours, three stroke widths, PNG export, and a clipboard seam.
+Selection, undo, and the save dialog come later.
 
 ## Requirements
 
@@ -88,13 +89,18 @@ In the editor:
 | Key | Action |
 | --- | --- |
 | `V` | select tool (no move or resize yet) |
+| `L` | line tool: drag to draw |
 | `A` | arrow tool: drag to draw |
+| `R` | rectangle tool: drag out the box |
+| `O` | ellipse tool: drag out the box |
+| `X` | redaction tool: drag out an opaque black box |
 | `T` | text tool: click, type, `Enter` commits, `Shift+Enter` adds a line, `Esc` discards |
 | `Enter` | copy the annotated PNG at source resolution and close |
 | `Esc` | close without writing anything |
 
-The toolbar has the same tools and a Copy button. The whole capture is fitted to the window.
-There is no zoom or pan.
+The toolbar has the same tools, six colours, three stroke widths, and a Copy button. New
+annotations use the selected colour and width; redaction is always opaque black. The whole
+capture is fitted to the window. There is no zoom or pan.
 
 ## Test
 
@@ -103,10 +109,10 @@ cargo test --offline
 ```
 
 The editor tests drive a real Rune runtime through the explicit-image seam: they generate a
-3840x2160 fixture, draw an arrow with the pointer, type and commit a label, press Enter, and
-assert on the PNG a memory clipboard sink received. The daemon tests cover the state
-machine, the socket, the trigger client, and the installer with a fake `gsettings` and a
-temporary HOME.
+3840x2160 fixture, draw shapes with the pointer, change the colour and stroke width, type
+and commit a label, press Enter, and assert on the PNG a memory clipboard sink received. The
+daemon tests cover the state machine, the socket, the trigger client, and the installer with
+a fake `gsettings` and a temporary HOME.
 
 To print the spike timings:
 
@@ -126,7 +132,7 @@ run.
 | `src/ipc.rs` | Unix socket server, lock file, trigger client |
 | `src/notify.rs` | Desktop notification trait and zbus adapter |
 | `src/resident.rs` | Windowless Rune daemon that opens the editor |
-| `src/document.rs` | Annotation document, ids, draw order, shared arrow geometry |
+| `src/document.rs` | Annotation document, ids, draw order, palette, shared shape geometry |
 | `src/editor.rs` | Editor state, Rune view, input handlers, copy and close |
 | `src/text.rs` | Parley shaping, swash outlines, tiny-skia text plus halo |
 | `src/render.rs` | The source-resolution annotation layer |
@@ -135,8 +141,8 @@ run.
 | `src/cli.rs` | Modes: trigger, daemon, `--editor`, `--capture` |
 | `scripts/install.sh` | Install and uninstall |
 
-## Not in this ticket
+## Not yet
 
-No rectangle, ellipse, or redaction tools. No selection move or resize. No undo or redo. No
-save dialog. The document and render seams keep stable ids, a kind enum, and draw order so
-those can be added without reshaping the editor.
+No selection move, resize, or delete. No undo or redo. No save dialog. No desktop acceptance
+run. The document and render seams keep stable ids, a kind enum, and draw order so those can
+be added without reshaping the editor.
