@@ -1662,7 +1662,7 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
     toolbar = toolbar
         .child(rune::spacer())
         .child(
-            text("Esc discards")
+            text("Enter copies · Esc discards")
                 .font(type_::LABEL)
                 .color(theme.text_secondary),
         )
