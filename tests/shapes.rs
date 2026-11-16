@@ -372,7 +372,7 @@ fn a_later_redaction_covers_an_earlier_arrow() {
 }
 
 #[test]
-fn drags_past_the_image_edge_are_cropped_to_the_capture() {
+fn drags_past_the_image_edge_keep_their_geometry_and_clip_in_the_png() {
     let dir = TempDir::new("clipping");
     let fixture = write_4k_fixture(dir.path());
     let (sink, mut rt) = headless_editor(&fixture);
@@ -381,7 +381,7 @@ fn drags_past_the_image_edge_are_cropped_to_the_capture() {
     rt.frame(0.0);
     assert!(
         drag(&mut rt, [3000.0, 1000.0], [4200.0, 2400.0]),
-        "the draft is shown before it is cropped"
+        "the draft is shown while it extends past the edge"
     );
 
     rt.key(key_text("l"));
@@ -394,28 +394,72 @@ fn drags_past_the_image_edge_are_cropped_to_the_capture() {
         panic!("expected a rectangle, got {:?}", annotations[0].kind);
     };
     assert_near(start, [3000.0, 1000.0]);
-    assert_near(end, [3840.0, 2160.0]);
+    assert_near(end, [4200.0, 2400.0]);
     let AnnotationKind::Line { start, end } = annotations[1].kind else {
         panic!("expected a line, got {:?}", annotations[1].kind);
     };
     assert_near(start, [3000.0, 500.0]);
-    assert_near(end, [3840.0, 500.0]);
+    assert_near(end, [4200.0, 500.0]);
 
     let image = export(&sink, &mut rt);
-    let right_edge = image.get_pixel(3835, 1500).0;
+    let rectangle_top = image.get_pixel(3830, 1000).0;
     assert!(
-        is_annotation_red(right_edge),
-        "the rectangle reaches the image edge: {right_edge:?}"
+        is_annotation_red(rectangle_top),
+        "the rectangle's top edge reaches the image edge: {rectangle_top:?}"
+    );
+    assert!(
+        !is_annotation_red(image.get_pixel(3835, 1500).0),
+        "the right edge stayed outside the capture instead of shrinking to it"
     );
     let line_end = image.get_pixel(3830, 500).0;
     assert!(
         is_annotation_red(line_end),
-        "the line is cropped at the image edge: {line_end:?}"
+        "the line is clipped at the image edge: {line_end:?}"
     );
     assert_eq!(
         image.get_pixel(10, 1500).0,
         [36, 36, 36, 255],
         "nothing wraps to the opposite edge"
+    );
+}
+
+#[test]
+fn a_rectangle_drawn_past_the_edge_shows_its_full_size_after_moving_inside() {
+    let dir = TempDir::new("clipping-move");
+    let fixture = write_4k_fixture(dir.path());
+    let (sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("r"));
+    rt.frame(0.0);
+    assert!(drag(&mut rt, [3000.0, 1000.0], [4200.0, 2400.0]));
+
+    rt.key(key_text("v"));
+    rt.frame(0.0);
+    click(&mut rt, [3400.0, 1500.0]);
+    assert!(rt.state.selected().is_some(), "the rectangle is selected");
+    drag(&mut rt, [3400.0, 1500.0], [2900.0, 1000.0]);
+
+    let AnnotationKind::Rectangle { start, end } = rt.state.document().annotations()[0].kind
+    else {
+        panic!("expected a rectangle");
+    };
+    assert_near(start, [2500.0, 500.0]);
+    assert_near(end, [3700.0, 1900.0]);
+
+    let image = export(&sink, &mut rt);
+    let right_edge = image.get_pixel(3695, 1000).0;
+    assert!(
+        is_annotation_red(right_edge),
+        "the full right edge is visible after the move: {right_edge:?}"
+    );
+    let bottom_edge = image.get_pixel(3000, 1895).0;
+    assert!(
+        is_annotation_red(bottom_edge),
+        "the full bottom edge is visible after the move: {bottom_edge:?}"
+    );
+    assert!(
+        !is_annotation_red(image.get_pixel(3345, 1200).0),
+        "the rectangle is not left at the size it had when it was cropped"
     );
 }
 

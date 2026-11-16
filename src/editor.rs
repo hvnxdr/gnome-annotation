@@ -17,8 +17,8 @@ use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
 use crate::document::{
     Annotation, AnnotationKind, DEFAULT_TEXT_SIZE_INDEX, Document, MIN_DRAG_PX, PALETTE, Point,
-    Rect, Rgba, STROKE_WIDTHS_PT, TEXT_SIZES_PT, arrow_geometry, crop_segment, ellipse_points,
-    line_length, point_in_rect,
+    Rect, Rgba, STROKE_WIDTHS_PT, TEXT_SIZES_PT, arrow_geometry, ellipse_points, line_length,
+    point_in_rect,
 };
 use crate::export::{self, ExportError};
 use crate::render::{render_annotations, render_annotations_excluding};
@@ -667,40 +667,35 @@ impl Editor {
             return;
         };
         let stroke_px = self.stroke_px();
-        let bounds = Rect {
-            x: 0.0,
-            y: 0.0,
-            w: self.source.width as f32,
-            h: self.source.height as f32,
-        };
+        // Store the geometry the user dragged. The annotation layer is image-sized, so the
+        // renderer clips the paint at the capture bounds. Cropping here would shrink the
+        // document and lose the part outside the image when the annotation is moved back in.
         let raw_rect = Rect::normalized(draft.start, draft.end);
-        let cropped_rect = raw_rect.crop(bounds);
         let rect_kind = |rect: Rect, make: fn(Point, Point) -> AnnotationKind| {
             (!rect.is_too_small())
                 .then_some(make([rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h]))
         };
         let kind =
             match draft.tool {
-                Tool::Line => crop_segment(draft.start, draft.end, bounds)
-                    .map(|(start, end)| AnnotationKind::Line { start, end }),
-                // An arrowhead belongs at the drag's end point. Cropping the segment would move it
-                // inside the image, so keep the drag and let the layer clip the paint.
+                Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX)
+                    .then_some(AnnotationKind::Line {
+                        start: draft.start,
+                        end: draft.end,
+                    }),
                 Tool::Arrow => arrow_geometry(draft.start, draft.end, stroke_px).map(|_| {
                     AnnotationKind::Arrow {
                         start: draft.start,
                         end: draft.end,
                     }
                 }),
-                Tool::Rectangle => rect_kind(cropped_rect, |start, end| {
+                Tool::Rectangle => rect_kind(raw_rect, |start, end| {
                     AnnotationKind::Rectangle { start, end }
                 }),
-                // Cropping the box of an ellipse changes the curve, so keep the drag box and let
-                // the image-sized layer clip the paint instead.
                 Tool::Ellipse => rect_kind(raw_rect, |start, end| AnnotationKind::Ellipse {
                     start,
                     end,
                 }),
-                Tool::Redaction => rect_kind(cropped_rect, |start, end| {
+                Tool::Redaction => rect_kind(raw_rect, |start, end| {
                     AnnotationKind::Redaction { start, end }
                 }),
                 Tool::Select | Tool::Text => None,
