@@ -279,13 +279,19 @@ impl Editor {
         self.redo_stack.clear();
     }
 
-    /// Drop everything that points into the old document: selection, live gesture, draft,
-    /// and text field. Undo and redo redraw the canvas from the restored snapshot.
-    fn clear_transient(&mut self) {
+    /// Drop the selection and everything drawn from it. The draft and text field are left
+    /// alone because each caller decides whether they survive.
+    fn clear_selection_state(&mut self) {
         self.selected = None;
         self.gesture = None;
         self.chrome = None;
         self.hover = Hover::None;
+    }
+
+    /// Drop everything that points into the old document: selection, live gesture, draft,
+    /// and text field. Undo and redo redraw the canvas from the restored snapshot.
+    fn clear_transient(&mut self) {
+        self.clear_selection_state();
         self.draft = None;
         self.editing = None;
     }
@@ -325,7 +331,7 @@ impl Editor {
 
     /// The topmost annotation under `point`, in source-image pixels.
     fn hit_test(&mut self, point: Point) -> Option<u64> {
-        let six_pt_px = 6.0 / self.fit_scale().max(f32::EPSILON);
+        let six_pt_px = pt_to_px(6.0, self.fit_scale());
         let mut found = None;
         for annotation in self.document.annotations().iter().rev() {
             let hit = match &annotation.kind {
@@ -398,13 +404,13 @@ impl Editor {
 
     /// The selected screen-point width converted to source-image pixels.
     fn stroke_px(&self) -> f32 {
-        self.width_pt / self.fit_scale()
+        pt_to_px(self.width_pt, self.fit_scale())
     }
 
     /// The selected text size in screen points converted to source-image pixels. Storing
     /// pixels keeps a label's on-screen size after the window resizes.
     fn text_size_px(&self) -> f32 {
-        self.text_size_pt / self.fit_scale()
+        pt_to_px(self.text_size_pt, self.fit_scale())
     }
 
     pub fn set_tool(&mut self, tool: Tool) {
@@ -545,10 +551,7 @@ impl Editor {
             opened_at: None,
             edit,
         });
-        self.selected = None;
-        self.gesture = None;
-        self.chrome = None;
-        self.hover = Hover::None;
+        self.clear_selection_state();
         self.draft = None;
         self.rebuild_overlay_excluding(Some(id));
         true
@@ -635,10 +638,7 @@ impl Editor {
                     self.document.set_kind(id, kind);
                 }
             }
-            self.selected = None;
-            self.gesture = None;
-            self.chrome = None;
-            self.hover = Hover::None;
+            self.clear_selection_state();
             self.rebuild_overlay();
             return;
         }
@@ -675,37 +675,7 @@ impl Editor {
         // Store the geometry the user dragged. The annotation layer is image-sized, so the
         // renderer clips the paint at the capture bounds. Cropping here would shrink the
         // document and lose the part outside the image when the annotation is moved back in.
-        let raw_rect = Rect::normalized(draft.start, draft.end);
-        let rect_kind = |rect: Rect, make: fn(Point, Point) -> AnnotationKind| {
-            (!rect.is_too_small())
-                .then_some(make([rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h]))
-        };
-        let kind =
-            match draft.tool {
-                Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX)
-                    .then_some(AnnotationKind::Line {
-                        start: draft.start,
-                        end: draft.end,
-                    }),
-                Tool::Arrow => arrow_geometry(draft.start, draft.end, stroke_px).map(|_| {
-                    AnnotationKind::Arrow {
-                        start: draft.start,
-                        end: draft.end,
-                    }
-                }),
-                Tool::Rectangle => rect_kind(raw_rect, |start, end| {
-                    AnnotationKind::Rectangle { start, end }
-                }),
-                Tool::Ellipse => rect_kind(raw_rect, |start, end| AnnotationKind::Ellipse {
-                    start,
-                    end,
-                }),
-                Tool::Redaction => rect_kind(raw_rect, |start, end| {
-                    AnnotationKind::Redaction { start, end }
-                }),
-                Tool::Select | Tool::Text => None,
-            };
-        let Some(kind) = kind else {
+        let Some(kind) = draft_kind(draft.tool, draft.start, draft.end, stroke_px) else {
             return;
         };
         let (color, stroke_px) = if matches!(kind, AnnotationKind::Redaction { .. }) {
@@ -751,7 +721,7 @@ impl Editor {
         if scale <= 0.0 {
             return [0.0, 0.0];
         }
-        [drag.x / scale, drag.y / scale]
+        point_at([drag.x, drag.y], scale)
     }
 
     /// Rasterise text once for the live preview; only its position changes while dragging.
@@ -771,7 +741,7 @@ impl Editor {
     }
 
     fn handle_at(&self, handles: &[Point], point: Point) -> Option<usize> {
-        let tolerance_px = 6.0 / self.fit_scale().max(f32::EPSILON);
+        let tolerance_px = pt_to_px(6.0, self.fit_scale());
         handles
             .iter()
             .position(|handle| line_length(*handle, point) <= tolerance_px)
@@ -847,10 +817,7 @@ impl Editor {
             return;
         }
         let Some(id) = self.hit_test(point) else {
-            self.selected = None;
-            self.gesture = None;
-            self.chrome = None;
-            self.hover = Hover::None;
+            self.clear_selection_state();
             return;
         };
         self.selected = Some(id);
@@ -887,7 +854,7 @@ impl Editor {
     fn move_gesture(&mut self, point: Point) {
         // A click that pairs into a double-click may jitter by the system's click slop.
         // Keep such a press from nudging text before it reopens for editing.
-        let dead_zone_px = 4.0 / self.fit_scale().max(f32::EPSILON);
+        let dead_zone_px = pt_to_px(4.0, self.fit_scale());
         let Some(gesture) = &mut self.gesture else {
             return;
         };
@@ -917,18 +884,12 @@ impl Editor {
             return false;
         };
         if self.document.get(id).is_none() {
-            self.selected = None;
-            self.gesture = None;
-            self.chrome = None;
-            self.hover = Hover::None;
+            self.clear_selection_state();
             return false;
         }
         self.record_edit();
         self.document.remove(id);
-        self.selected = None;
-        self.gesture = None;
-        self.chrome = None;
-        self.hover = Hover::None;
+        self.clear_selection_state();
         self.rebuild_overlay();
         true
     }
@@ -948,11 +909,11 @@ impl Editor {
     /// Track the pointer over the canvas so its cursor can say Move or Grab. Changing only
     /// when the class changes keeps ordinary pointer motion from rebuilding the view.
     fn on_canvas_pointer_move(&mut self, local: [f32; 2]) {
-        let scale = self.canvas_pt[0] / self.source.width as f32;
+        let scale = self.fit_scale();
         if scale <= 0.0 {
             return;
         }
-        let point = [local[0] / scale, local[1] / scale];
+        let point = point_at(local, scale);
         self.last_point = point;
         if self.tool != Tool::Select || self.gesture.is_some() {
             return;
@@ -1151,92 +1112,85 @@ fn points_bounds(points: &[Point]) -> Option<Rect> {
     })
 }
 
-/// The in-flight draft in screen points, built from the same geometry the exporter uses.
-fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
-    let scale = editor.fit_scale();
-    if scale <= 0.0 {
-        return None;
-    }
-    let color = rune_color(editor.color);
-    let width = editor.width_pt.max(0.5);
-    let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
-    match draft.tool {
-        Tool::Line => (line_length(draft.start, draft.end) >= MIN_DRAG_PX).then(|| {
-            Shape::new().line(
-                to_pt(draft.start),
-                to_pt(draft.end),
-                width,
-                LineCap::Round,
-                color,
-            )
+/// Screen points to source-image pixels at `scale` points per pixel.
+fn pt_to_px(pt: f32, scale: f32) -> f32 {
+    pt / scale.max(f32::EPSILON)
+}
+
+/// Source-image pixels to screen points at `scale` points per pixel.
+fn px_to_pt(px: f32, scale: f32) -> f32 {
+    px * scale
+}
+
+/// A canvas-local point in source-image pixels.
+fn point_at(local: [f32; 2], scale: f32) -> Point {
+    [pt_to_px(local[0], scale), pt_to_px(local[1], scale)]
+}
+
+/// A source-image point in canvas-local points.
+fn point_to_pt(point: Point, scale: f32) -> [f32; 2] {
+    [px_to_pt(point[0], scale), px_to_pt(point[1], scale)]
+}
+
+/// The kind a drawing tool would commit for a drag. The draft preview and `finish_draft`
+/// share this, so a preview and its committed annotation always have the same geometry.
+fn draft_kind(tool: Tool, start: Point, end: Point, stroke_px: f32) -> Option<AnnotationKind> {
+    let rect = Rect::normalized(start, end);
+    let rect_kind = |make: fn(Point, Point) -> AnnotationKind| {
+        (!rect.is_too_small())
+            .then_some(make([rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h]))
+    };
+    match tool {
+        Tool::Line => (line_length(start, end) >= MIN_DRAG_PX).then_some(AnnotationKind::Line {
+            start,
+            end,
         }),
-        Tool::Arrow => {
-            arrow_geometry(draft.start, draft.end, editor.width_pt / scale).map(|geometry| {
-                let mut shape = Shape::new().line(
-                    to_pt(geometry.start),
-                    to_pt(geometry.end),
-                    width,
-                    LineCap::Round,
-                    color,
-                );
-                shape = shape.fill(
-                    geometry.head.iter().map(|p| to_pt(*p)).collect::<Vec<_>>(),
-                    color,
-                );
-                shape
-            })
-        }
-        Tool::Rectangle => {
-            let rect = Rect::normalized(draft.start, draft.end);
-            (!rect.is_too_small()).then(|| {
-                Shape::new().stroke_with(
-                    rect.corners().map(to_pt).to_vec(),
-                    true,
-                    width,
-                    LineCap::Round,
-                    color,
-                )
-            })
-        }
-        Tool::Ellipse => {
-            let rect = Rect::normalized(draft.start, draft.end);
-            (!rect.is_too_small()).then(|| {
-                Shape::new().stroke_with(
-                    ellipse_points(rect)
-                        .into_iter()
-                        .map(to_pt)
-                        .collect::<Vec<_>>(),
-                    true,
-                    width,
-                    LineCap::Round,
-                    color,
-                )
-            })
-        }
-        Tool::Redaction => {
-            let rect = Rect::normalized(draft.start, draft.end);
-            (!rect.is_too_small()).then(|| {
-                Shape::new().fill(rect.corners().map(to_pt).to_vec(), rune_color(Rgba::BLACK))
-            })
-        }
+        Tool::Arrow => arrow_geometry(start, end, stroke_px).map(|_| AnnotationKind::Arrow {
+            start,
+            end,
+        }),
+        Tool::Rectangle => rect_kind(|start, end| AnnotationKind::Rectangle { start, end }),
+        Tool::Ellipse => rect_kind(|start, end| AnnotationKind::Ellipse { start, end }),
+        Tool::Redaction => rect_kind(|start, end| AnnotationKind::Redaction { start, end }),
         Tool::Select | Tool::Text => None,
     }
 }
 
+/// The in-flight draft in screen points, built from the same geometry the exporter uses.
+fn draft_shape(editor: &Editor, draft: &Draft) -> Option<Shape> {
+    let stroke_px = editor.stroke_px();
+    let kind = draft_kind(draft.tool, draft.start, draft.end, stroke_px)?;
+    shape_for_kind(&kind, editor.color, stroke_px, editor.fit_scale())
+}
+
 /// The live preview of an annotation under adjustment, built from the same geometry the
-/// exporter uses once the gesture commits.
+/// exporter uses once the gesture commits. Text is a raster image and has no shape.
 fn annotation_shape(annotation: &Annotation, scale: f32) -> Option<Shape> {
+    shape_for_kind(
+        &annotation.kind,
+        annotation.color,
+        annotation.stroke_px,
+        scale,
+    )
+}
+
+fn shape_for_kind(
+    kind: &AnnotationKind,
+    color: Rgba,
+    stroke_px: f32,
+    scale: f32,
+) -> Option<Shape> {
     if scale <= 0.0 {
         return None;
     }
-    let color = rune_color(annotation.color);
-    let width = (annotation.stroke_px * scale).max(0.5);
-    let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
-    match &annotation.kind {
+    let color = rune_color(color);
+    let width = px_to_pt(stroke_px, scale).max(0.5);
+    let to_pt = |point: Point| point_to_pt(point, scale);
+    match kind {
         AnnotationKind::Line { start, end } => (line_length(*start, *end) >= MIN_DRAG_PX)
             .then(|| Shape::new().line(to_pt(*start), to_pt(*end), width, LineCap::Round, color)),
-        AnnotationKind::Arrow { start, end } => arrow_geometry(*start, *end, annotation.stroke_px)
-            .map(|geometry| {
+        AnnotationKind::Arrow { start, end } => {
+            arrow_geometry(*start, *end, stroke_px).map(|geometry| {
                 let mut shape = Shape::new().line(
                     to_pt(geometry.start),
                     to_pt(geometry.end),
@@ -1249,7 +1203,8 @@ fn annotation_shape(annotation: &Annotation, scale: f32) -> Option<Shape> {
                     color,
                 );
                 shape
-            }),
+            })
+        }
         AnnotationKind::Rectangle { start, end } => {
             let rect = Rect::normalized(*start, *end);
             (!rect.is_too_small()).then(|| {
@@ -1346,22 +1301,26 @@ fn color_swatch<S: HostsEditor + 'static>(index: usize, selected: bool, theme: &
         })
 }
 
-fn width_button<S: HostsEditor + 'static>(
-    index: usize,
+/// A square choice button for a width or text size. Both pickers share the same chrome;
+/// only the key, label, value, and action differ.
+fn choice_button<S: HostsEditor + 'static>(
+    key: String,
+    label: String,
+    value: u32,
     selected: bool,
     theme: &tok::Theme,
     accent: Color,
+    on_press: impl Fn(&mut Editor) + 'static,
 ) -> El {
-    let width_pt = STROKE_WIDTHS_PT[index];
     let fill = if selected {
         accent
     } else {
         theme.control_track
     };
     let ink = if selected { Color::WHITE } else { theme.text };
-    el().key(format!("width-{index}"))
+    el().key(key)
         .role("button")
-        .label(format!("Stroke width {width_pt} points"))
+        .label(label)
         .focusable(true)
         .cursor(rune::Cursor::Pointer)
         .size(30.0, 30.0)
@@ -1374,52 +1333,10 @@ fn width_button<S: HostsEditor + 'static>(
         .center()
         .on_press(move |state: &mut S| {
             if let Some(editor) = state.editor_mut() {
-                editor.set_width_pt(width_pt);
+                on_press(editor);
             }
         })
-        .child(
-            text(format!("{}", width_pt as u32))
-                .font(type_::LABEL)
-                .color(ink),
-        )
-}
-
-fn text_size_button<S: HostsEditor + 'static>(
-    index: usize,
-    selected: bool,
-    theme: &tok::Theme,
-    accent: Color,
-) -> El {
-    let size_pt = TEXT_SIZES_PT[index];
-    let fill = if selected {
-        accent
-    } else {
-        theme.control_track
-    };
-    let ink = if selected { Color::WHITE } else { theme.text };
-    el().key(format!("text-size-{index}"))
-        .role("button")
-        .label(format!("Text size {size_pt} points"))
-        .focusable(true)
-        .cursor(rune::Cursor::Pointer)
-        .size(30.0, 30.0)
-        .radius(tok::radius::SM)
-        .fill(fill)
-        .hover(if selected { accent } else { theme.hover })
-        .press(if selected { accent } else { theme.press })
-        .preserve_focus_on_press(true)
-        .keeps_text_selection()
-        .center()
-        .on_press(move |state: &mut S| {
-            if let Some(editor) = state.editor_mut() {
-                editor.set_text_size_pt(size_pt);
-            }
-        })
-        .child(
-            text(format!("{}", size_pt as u32))
-                .font(type_::LABEL)
-                .color(ink),
-        )
+        .child(text(format!("{value}")).font(type_::LABEL).color(ink))
 }
 
 pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
@@ -1482,10 +1399,13 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                 layer = layer.child(
                     el().key("live-text")
                         .absolute(
-                            (position[0] + text.offset[0]) * scale,
-                            (position[1] + text.offset[1]) * scale,
+                            px_to_pt(position[0] + text.offset[0], scale),
+                            px_to_pt(position[1] + text.offset[1], scale),
                         )
-                        .size(text.size[0] * scale, text.size[1] * scale)
+                        .size(
+                            px_to_pt(text.size[0], scale),
+                            px_to_pt(text.size[1], scale),
+                        )
                         .pixels(text.image.pixels()),
                 );
                 painted = true;
@@ -1498,7 +1418,7 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
     if let Some(chrome) = &editor.chrome {
         let scale = editor.fit_scale();
         if scale > 0.0 {
-            let to_pt = |point: Point| [point[0] * scale, point[1] * scale];
+            let to_pt = |point: Point| point_to_pt(point, scale);
             let mut layer = el()
                 .key("selection")
                 .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
@@ -1522,8 +1442,8 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                 layer = layer.child(
                     el().key(format!("handle-{index}"))
                         .absolute(
-                            handle[0] * scale - HANDLE_SIZE_PT / 2.0,
-                            handle[1] * scale - HANDLE_SIZE_PT / 2.0,
+                            px_to_pt(handle[0], scale) - HANDLE_SIZE_PT / 2.0,
+                            px_to_pt(handle[1], scale) - HANDLE_SIZE_PT / 2.0,
                         )
                         .size(HANDLE_SIZE_PT, HANDLE_SIZE_PT)
                         .radius(1.0)
@@ -1535,15 +1455,12 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
         }
     }
     if let Some(editing) = &editor.editing {
-        let scale = if editor.canvas_pt[0] > 0.0 {
-            editor.canvas_pt[0] / editor.source.width as f32
-        } else {
-            1.0
-        };
+        let scale = editor.fit_scale();
         let font_size = editing
             .live_size_pt(editor.text_size_pt, editor.fit_scale())
             .clamp(9.0, 96.0);
-        let x_pt = editing.position[0] * scale;
+        let x_pt = px_to_pt(editing.position[0], scale);
+        let y_pt = px_to_pt(editing.position[1], scale);
         // Give the field the rest of the canvas (capped) so a normal label is typed on one
         // line. The committed text never wraps; this only keeps the live field from doing so.
         let field_width = (editor.canvas_pt[0] - x_pt - 8.0).clamp(200.0, 960.0);
@@ -1551,7 +1468,7 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
         canvas_el = canvas_el.child(
             text_input(&editing.edit, style)
                 .key("text-editor")
-                .absolute(x_pt, editing.position[1] * scale)
+                .absolute(x_pt, y_pt)
                 .w(field_width)
                 .min_h(font_size * 1.6)
                 .padding(2.0)
@@ -1589,7 +1506,7 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
             const SLOP_PT: f32 = 4.0;
             canvas_el = canvas_el.child(
                 el().key("text-double-press")
-                    .absolute(x_pt - SLOP_PT, editing.position[1] * scale - SLOP_PT)
+                    .absolute(x_pt - SLOP_PT, y_pt - SLOP_PT)
                     .size(SLOP_PT * 2.0 + 1.0, SLOP_PT * 2.0 + 1.0)
                     .on_drag(|state: &mut S, drag, _tx| {
                         if drag.phase == Phase::Down
@@ -1716,19 +1633,27 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
         toolbar = toolbar.child(color_swatch::<S>(index, editor.color == *color, &theme));
     }
     for (index, width_pt) in STROKE_WIDTHS_PT.iter().enumerate() {
-        toolbar = toolbar.child(width_button::<S>(
-            index,
-            editor.width_pt == *width_pt,
+        let width_pt = *width_pt;
+        toolbar = toolbar.child(choice_button::<S>(
+            format!("width-{index}"),
+            format!("Stroke width {width_pt} points"),
+            width_pt as u32,
+            editor.width_pt == width_pt,
             &theme,
             accent,
+            move |editor| editor.set_width_pt(width_pt),
         ));
     }
     for (index, size_pt) in TEXT_SIZES_PT.iter().enumerate() {
-        toolbar = toolbar.child(text_size_button::<S>(
-            index,
-            editor.text_size_pt == *size_pt,
+        let size_pt = *size_pt;
+        toolbar = toolbar.child(choice_button::<S>(
+            format!("text-size-{index}"),
+            format!("Text size {size_pt} points"),
+            size_pt as u32,
+            editor.text_size_pt == size_pt,
             &theme,
             accent,
+            move |editor| editor.set_text_size_pt(size_pt),
         ));
     }
     toolbar = toolbar
