@@ -429,6 +429,11 @@ impl Editor {
         self.error = Some(error.into());
     }
 
+    /// The capture GNOME wrote. Save must never write over this file.
+    pub fn capture_path(&self) -> &std::path::Path {
+        &self.image_path
+    }
+
     /// The name the chooser suggests: the capture stem plus `-annotated.png`. The output is
     /// always PNG, whatever extension the capture had.
     pub fn suggested_save_name(&self) -> String {

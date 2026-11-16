@@ -543,6 +543,82 @@ fn a_save_writes_only_the_chosen_file_and_never_touches_the_capture() {
 }
 
 #[test]
+fn choosing_the_original_capture_is_refused_and_leaves_it_unchanged() {
+    let dir = TempDir::new("save-original");
+    let fixture = write_capture(dir.path());
+    let original = std::fs::read(&fixture).expect("read the capture");
+    let mut rt = dialog_editor(&fixture);
+
+    rt.key(ctrl_s());
+    rt.frame(0.0);
+    rt.resolve_file_dialog(Some(fixture.clone()))
+        .expect("the dialog is open");
+    rt.frame(0.0);
+    for _ in 0..60 {
+        rt.frame(1.0 / 120.0);
+    }
+
+    assert_eq!(
+        rt.shell_request, None,
+        "a refused save leaves the editor open"
+    );
+    assert_eq!(
+        rt.state.error(),
+        Some("cannot overwrite the original capture")
+    );
+    let shown = rt
+        .elements()
+        .into_iter()
+        .find(|element| element.key.as_deref() == Some("error"))
+        .expect("the toolbar shows the refusal");
+    assert_eq!(
+        shown.text.as_deref(),
+        Some("cannot overwrite the original capture")
+    );
+    assert_eq!(
+        std::fs::read(&fixture).expect("read the capture again"),
+        original,
+        "the GNOME original is byte for byte unchanged"
+    );
+    let entries: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("list the capture directory")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect();
+    assert_eq!(
+        entries,
+        vec![std::ffi::OsString::from("Screenshot from 2026-11-16.png")],
+        "the refused save writes nothing"
+    );
+    assert!(rt.presented("canvas").is_some());
+}
+
+#[test]
+fn choosing_an_alias_of_the_original_capture_is_refused() {
+    let dir = TempDir::new("save-original-alias");
+    let fixture = write_capture(dir.path());
+    let original = std::fs::read(&fixture).expect("read the capture");
+    let alias = dir.path().join("alias.png");
+    std::os::unix::fs::symlink(&fixture, &alias).expect("create the alias");
+    let mut rt = dialog_editor(&fixture);
+
+    rt.key(ctrl_s());
+    rt.frame(0.0);
+    rt.resolve_file_dialog(Some(alias)).expect("the dialog is open");
+    rt.frame(0.0);
+
+    assert_eq!(rt.shell_request, None, "the editor stays open");
+    assert_eq!(
+        rt.state.error(),
+        Some("cannot overwrite the original capture")
+    );
+    assert_eq!(
+        std::fs::read(&fixture).expect("read the capture again"),
+        original,
+        "writing through the alias would have destroyed the original"
+    );
+}
+
+#[test]
 fn copy_and_save_produce_identical_bytes_for_the_same_document() {
     let dir = TempDir::new("save-same-bytes");
     let fixture = write_capture(dir.path());

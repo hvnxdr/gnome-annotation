@@ -3,7 +3,7 @@
 //! The real target is the FileChooser portal through Rune's `Tx::save_file`. Tests inject a
 //! memory sink that records the suggested name and the bytes, and can cancel or fail.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rune::{FileDialogOptions, Tx};
@@ -128,18 +128,47 @@ pub fn save_and_close<S: HostsEditor + 'static>(state: &mut S, tx: &mut Tx) {
                     return;
                 };
                 match result {
-                    Ok(Some(path)) => match write_png(&path, &png) {
-                        Ok(()) => tx.close_window(),
-                        Err(error) => {
+                    Ok(Some(path)) => {
+                        if same_file(editor.capture_path(), &path) {
+                            let error = "cannot overwrite the original capture".to_owned();
                             eprintln!("gnome-annotation: save failed: {error}");
                             editor.set_error(error);
+                            return;
                         }
-                    },
+                        match write_png(&path, &png) {
+                            Ok(()) => tx.close_window(),
+                            Err(error) => {
+                                eprintln!("gnome-annotation: save failed: {error}");
+                                editor.set_error(error);
+                            }
+                        }
+                    }
                     Ok(None) => {}
                     Err(error) => editor.set_error(error.to_string()),
                 }
             });
         }
+    }
+}
+
+/// Whether two paths name the same file. An existing file resolves through `canonicalize`;
+/// a path that does not exist yet resolves its parent, so a chosen name in a linked directory
+/// still compares equal to the capture.
+fn same_file(a: &Path, b: &Path) -> bool {
+    fn resolved(path: &Path) -> Option<PathBuf> {
+        if let Ok(canonical) = path.canonicalize() {
+            return Some(canonical);
+        }
+        let name = path.file_name()?;
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        parent.canonicalize().ok().map(|parent| parent.join(name))
+    }
+    match (resolved(a), resolved(b)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
     }
 }
 
