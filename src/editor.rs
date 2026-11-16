@@ -87,6 +87,9 @@ struct Editing {
     /// user picks another toolbar size.
     original_size_px: Option<f32>,
     size_changed: bool,
+    /// When a new label's field opened. The Text tool uses this to recognise the second
+    /// click of a double-click, which lands on the field instead of the canvas.
+    opened_at: Option<Instant>,
     edit: TextEdit,
 }
 
@@ -500,14 +503,16 @@ impl Editor {
             position,
             original_size_px: None,
             size_changed: false,
+            opened_at: Some(Instant::now()),
             edit,
         });
     }
 
-    /// Reopen a committed text annotation for editing. The Text tool is for placing new
-    /// labels; the Select tool owns this double-click edit.
+    /// Reopen a committed text annotation for editing. Select and Text both own this
+    /// double-click edit; with Text, the first click of the pair may have opened an empty
+    /// new label, which `on_canvas_double_press` discards before this runs.
     fn begin_text_edit(&mut self) -> bool {
-        if self.tool != Tool::Select {
+        if !matches!(self.tool, Tool::Select | Tool::Text) {
             return false;
         }
         let Some(id) = self.hit_test(self.last_point) else {
@@ -532,6 +537,7 @@ impl Editor {
             position,
             original_size_px: Some(size_px),
             size_changed: false,
+            opened_at: None,
             edit,
         });
         self.selected = None;
@@ -544,7 +550,51 @@ impl Editor {
     }
 
     fn on_canvas_double_press(&mut self) {
-        self.begin_text_edit();
+        if self.tool == Tool::Text
+            && let Some(editing) = &self.editing
+        {
+            if editing.id.is_some() {
+                return;
+            }
+            if !editing.edit.text.is_empty() {
+                // A new label is already being typed; keep it rather than hijacking the
+                // second click into a re-edit.
+                return;
+            }
+            // The first click opened an empty field. Drop it so the committed text under
+            // the pointer can be reopened instead.
+            self.editing = None;
+        }
+        if self.begin_text_edit() {
+            return;
+        }
+        // A double press on empty canvas with Text still leaves a field to type into.
+        if self.tool == Tool::Text && self.editing.is_none() {
+            self.begin_text(self.last_point);
+        }
+    }
+
+    /// A press landed on the small catcher over a fresh, empty Text field. The field covers
+    /// the second click of a double-click, so the catcher forwards it as the double press.
+    fn on_text_catcher_press(&mut self) {
+        if self.tool != Tool::Text {
+            return;
+        }
+        let Some(editing) = &self.editing else {
+            return;
+        };
+        if editing.id.is_some() || !editing.edit.text.is_empty() {
+            return;
+        }
+        let Some(opened_at) = editing.opened_at else {
+            return;
+        };
+        // Rune's default double-click interval is 0.5 s. A later press is a caret placement.
+        if opened_at.elapsed() > std::time::Duration::from_millis(500) {
+            return;
+        }
+        self.last_point = editing.position;
+        self.on_canvas_double_press();
     }
 
     fn commit_text(&mut self) {
@@ -1526,8 +1576,26 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                     } else {
                         false
                     }
-                }),
+                })
         );
+        // With the Text tool, the first click of a double-click opens an empty field at the
+        // pointer, which covers the second click. Keep a small transparent catcher above the
+        // field's anchor so that second press still reaches the editor.
+        if editing.id.is_none() && editing.edit.text.is_empty() {
+            const SLOP_PT: f32 = 4.0;
+            canvas_el = canvas_el.child(
+                el().key("text-double-press")
+                    .absolute(x_pt - SLOP_PT, editing.position[1] * scale - SLOP_PT)
+                    .size(SLOP_PT * 2.0 + 1.0, SLOP_PT * 2.0 + 1.0)
+                    .on_drag(|state: &mut S, drag, _tx| {
+                        if drag.phase == Phase::Down
+                            && let Some(editor) = state.editor_mut()
+                        {
+                            editor.on_text_catcher_press();
+                        }
+                    }),
+            );
+        }
     }
     let cursor = match editor.hover {
         Hover::Move => rune::Cursor::Move,

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use gnome_annotation::assets::FONTS;
 use gnome_annotation::clipboard::MemoryClipboardSink;
 use gnome_annotation::document::AnnotationKind;
-use gnome_annotation::editor::{Editor, EditorOptions, editor_on_key, editor_view};
+use gnome_annotation::editor::{Editor, EditorOptions, Tool, editor_on_key, editor_view};
 use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
 use rune::{Env, Runtime, Shell, Waker};
@@ -355,6 +355,58 @@ fn double_click_reopens_text_and_commits_the_same_annotation() {
         pixel_bounds(&image, is_annotation_red).is_some(),
         "the edited label is exported"
     );
+}
+
+#[test]
+fn the_text_tool_double_click_reopens_committed_text_instead_of_stacking_a_label() {
+    let dir = TempDir::new("text-reedit-text-tool");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    place_text(&mut rt, [900.0, 1200.0], "Label");
+    let id = rt.state.document().annotations()[0].id;
+    assert!(text_field(&rt).is_none(), "the label is committed");
+    assert_eq!(rt.state.tool(), Tool::Text, "the text tool is still active");
+
+    // The first click may open an empty field. The double press must cancel it and reopen
+    // the committed text instead of committing an empty label and starting another.
+    double_click(&mut rt, [950.0, 1230.0]);
+    settle(&mut rt);
+
+    let field = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("text-editor") && !e.exiting)
+        .expect("double-click reopens the field with the text tool");
+    assert_eq!(
+        field.text.as_deref(),
+        Some("Label"),
+        "the field is pre-filled with the committed string"
+    );
+    assert!(field.focused, "the reopened field takes focus");
+    assert_eq!(
+        rt.state.document().annotations().len(),
+        1,
+        "the text tool did not stack a second annotation"
+    );
+
+    rt.paste("2");
+    rt.frame(0.0);
+    assert_eq!(text_field(&rt).as_deref(), Some("Label2"));
+    rt.key(enter());
+    rt.frame(0.0);
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(
+        annotations.len(),
+        1,
+        "the edit updates the existing annotation"
+    );
+    assert_eq!(annotations[0].id, id, "the annotation keeps its id");
+    let AnnotationKind::Text { text, .. } = &annotations[0].kind else {
+        panic!("expected text");
+    };
+    assert_eq!(text, "Label2");
 }
 
 #[test]
