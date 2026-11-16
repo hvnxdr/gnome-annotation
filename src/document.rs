@@ -288,9 +288,11 @@ impl AnnotationKind {
                 if line_length(fixed, point) < MIN_DRAG_PX {
                     return None;
                 }
-                Some(self.map_endpoints(|index, endpoint| {
-                    if index == handle { point } else { endpoint }
-                }))
+                Some(self.map_endpoints(
+                    |index, endpoint| {
+                        if index == handle { point } else { endpoint }
+                    },
+                ))
             }
             Self::Rectangle { start, end }
             | Self::Ellipse { start, end }

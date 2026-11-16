@@ -439,8 +439,7 @@ fn a_rectangle_drawn_past_the_edge_shows_its_full_size_after_moving_inside() {
     assert!(rt.state.selected().is_some(), "the rectangle is selected");
     drag(&mut rt, [3400.0, 1500.0], [2900.0, 1000.0]);
 
-    let AnnotationKind::Rectangle { start, end } = rt.state.document().annotations()[0].kind
-    else {
+    let AnnotationKind::Rectangle { start, end } = rt.state.document().annotations()[0].kind else {
         panic!("expected a rectangle");
     };
     assert_near(start, [2500.0, 500.0]);

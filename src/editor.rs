@@ -1137,18 +1137,15 @@ fn point_to_pt(point: Point, scale: f32) -> [f32; 2] {
 fn draft_kind(tool: Tool, start: Point, end: Point, stroke_px: f32) -> Option<AnnotationKind> {
     let rect = Rect::normalized(start, end);
     let rect_kind = |make: fn(Point, Point) -> AnnotationKind| {
-        (!rect.is_too_small())
-            .then_some(make([rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h]))
+        (!rect.is_too_small()).then_some(make([rect.x, rect.y], [rect.x + rect.w, rect.y + rect.h]))
     };
     match tool {
-        Tool::Line => (line_length(start, end) >= MIN_DRAG_PX).then_some(AnnotationKind::Line {
-            start,
-            end,
-        }),
-        Tool::Arrow => arrow_geometry(start, end, stroke_px).map(|_| AnnotationKind::Arrow {
-            start,
-            end,
-        }),
+        Tool::Line => {
+            (line_length(start, end) >= MIN_DRAG_PX).then_some(AnnotationKind::Line { start, end })
+        }
+        Tool::Arrow => {
+            arrow_geometry(start, end, stroke_px).map(|_| AnnotationKind::Arrow { start, end })
+        }
         Tool::Rectangle => rect_kind(|start, end| AnnotationKind::Rectangle { start, end }),
         Tool::Ellipse => rect_kind(|start, end| AnnotationKind::Ellipse { start, end }),
         Tool::Redaction => rect_kind(|start, end| AnnotationKind::Redaction { start, end }),
@@ -1174,12 +1171,7 @@ fn annotation_shape(annotation: &Annotation, scale: f32) -> Option<Shape> {
     )
 }
 
-fn shape_for_kind(
-    kind: &AnnotationKind,
-    color: Rgba,
-    stroke_px: f32,
-    scale: f32,
-) -> Option<Shape> {
+fn shape_for_kind(kind: &AnnotationKind, color: Rgba, stroke_px: f32, scale: f32) -> Option<Shape> {
     if scale <= 0.0 {
         return None;
     }
@@ -1402,10 +1394,7 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                             px_to_pt(position[0] + text.offset[0], scale),
                             px_to_pt(position[1] + text.offset[1], scale),
                         )
-                        .size(
-                            px_to_pt(text.size[0], scale),
-                            px_to_pt(text.size[1], scale),
-                        )
+                        .size(px_to_pt(text.size[0], scale), px_to_pt(text.size[1], scale))
                         .pixels(text.image.pixels()),
                 );
                 painted = true;
@@ -1497,7 +1486,7 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                     } else {
                         false
                     }
-                })
+                }),
         );
         // With the Text tool, the first click of a double-click opens an empty field at the
         // pointer, which covers the second click. Keep a small transparent catcher above the

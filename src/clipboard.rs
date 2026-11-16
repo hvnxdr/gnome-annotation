@@ -32,5 +32,3 @@ impl ClipboardSink for RuneClipboard {
         Ok(())
     }
 }
-
-

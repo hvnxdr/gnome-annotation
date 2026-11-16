@@ -603,7 +603,8 @@ fn choosing_an_alias_of_the_original_capture_is_refused() {
 
     rt.key(ctrl_s());
     rt.frame(0.0);
-    rt.resolve_file_dialog(Some(alias)).expect("the dialog is open");
+    rt.resolve_file_dialog(Some(alias))
+        .expect("the dialog is open");
     rt.frame(0.0);
 
     assert_eq!(rt.shell_request, None, "the editor stays open");

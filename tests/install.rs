@@ -179,11 +179,7 @@ fn install_writes_the_binary_entries_and_keybinding() {
 
 #[test]
 fn a_bin_directory_with_a_space_keeps_the_print_command_quoted() {
-    let fixture = Installer::with_bin_dir(
-        "install-space",
-        &format!("['{CUSTOM0}']"),
-        "bin dir",
-    );
+    let fixture = Installer::with_bin_dir("install-space", &format!("['{CUSTOM0}']"), "bin dir");
     assert_success(&fixture.run(&[]));
 
     let bin = fixture.bin_path();
