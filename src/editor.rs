@@ -735,7 +735,11 @@ impl Editor {
         };
         let next = match gesture.mode {
             GestureMode::Move => {
-                if line_length(gesture.anchor, point) < dead_zone_px {
+                // The dead zone only protects a press that has not moved yet, so a double-click
+                // does not nudge text. Once the gesture is under way, returning to the anchor
+                // must move the annotation back.
+                let already_moved = !same_geometry(&gesture.live.kind, &gesture.origin.kind);
+                if !already_moved && line_length(gesture.anchor, point) < dead_zone_px {
                     return;
                 }
                 let dx = point[0] - gesture.anchor[0];
@@ -911,6 +915,15 @@ fn nearest_text_size_pt(size_pt: f32) -> f32 {
         .into_iter()
         .min_by(|a, b| (a - size_pt).abs().total_cmp(&(b - size_pt).abs()))
         .unwrap_or(TEXT_SIZES_PT[DEFAULT_TEXT_SIZE_INDEX])
+}
+
+/// Whether two kinds paint the same thing, ignoring the corner order a box was drawn in. A
+/// gesture that ends where it began must not add a history entry.
+fn same_geometry(a: &AnnotationKind, b: &AnnotationKind) -> bool {
+    match (a, b) {
+        (AnnotationKind::Text { .. }, AnnotationKind::Text { .. }) => a == b,
+        _ => std::mem::discriminant(a) == std::mem::discriminant(b) && a.handles() == b.handles(),
+    }
 }
 
 fn rune_color(color: Rgba) -> Color {
