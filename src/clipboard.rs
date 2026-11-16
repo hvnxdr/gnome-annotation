@@ -1,7 +1,5 @@
 //! Clipboard sinks. The exporter hands the same PNG bytes to whichever sink is installed.
 
-use std::sync::{Arc, Mutex};
-
 use rune::{ClipboardContent, ClipboardImage, Tx};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,34 +33,4 @@ impl ClipboardSink for RuneClipboard {
     }
 }
 
-/// A sink that keeps every PNG it receives. Used by the headless editor tests.
-#[derive(Clone, Default)]
-pub struct MemoryClipboardSink {
-    writes: Arc<Mutex<Vec<Vec<u8>>>>,
-    fail: Arc<Mutex<Option<String>>>,
-}
 
-impl MemoryClipboardSink {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn writes(&self) -> Vec<Vec<u8>> {
-        self.writes.lock().unwrap().clone()
-    }
-
-    /// Make later writes fail, to exercise the editor's error path.
-    pub fn fail_writes(&self, error: Option<&str>) {
-        *self.fail.lock().unwrap() = error.map(str::to_owned);
-    }
-}
-
-impl ClipboardSink for MemoryClipboardSink {
-    fn write_png(&self, png: &[u8], _tx: &mut Tx) -> Result<(), ClipboardError> {
-        if let Some(error) = self.fail.lock().unwrap().clone() {
-            return Err(ClipboardError(error));
-        }
-        self.writes.lock().unwrap().push(png.to_vec());
-        Ok(())
-    }
-}

@@ -4,7 +4,7 @@
 //! memory sink that records the suggested name and the bytes, and can cancel or fail.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use rune::{FileDialogOptions, Tx};
 
@@ -28,65 +28,21 @@ pub enum SaveOutcome {
     Cancelled,
 }
 
+/// A record-only save target. Tests implement this; the app uses the file dialog.
+pub trait SaveSink: Send + Sync {
+    fn save(&self, suggested_name: &str, png: &[u8]) -> Result<SaveOutcome, SaveError>;
+}
+
 /// Where an exported PNG goes. The dialog is the only real target; memory is the test seam.
 #[derive(Clone)]
 pub enum SaveTarget {
     Dialog,
-    Memory(Arc<MemorySaveSink>),
+    Memory(Arc<dyn SaveSink>),
 }
 
 impl Default for SaveTarget {
     fn default() -> Self {
         Self::Dialog
-    }
-}
-
-/// One PNG a memory sink accepted, with the name the dialog would have suggested.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SavedPng {
-    pub suggested_name: String,
-    pub png: Vec<u8>,
-}
-
-/// A sink that keeps every PNG it receives. Used by the headless save tests.
-#[derive(Clone, Default)]
-pub struct MemorySaveSink {
-    saves: Arc<Mutex<Vec<SavedPng>>>,
-    cancel: Arc<Mutex<bool>>,
-    fail: Arc<Mutex<Option<String>>>,
-}
-
-impl MemorySaveSink {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn saves(&self) -> Vec<SavedPng> {
-        self.saves.lock().unwrap().clone()
-    }
-
-    /// Answer the next saves like a cancelled chooser: nothing is written and the editor stays.
-    pub fn cancel_saves(&self) {
-        *self.cancel.lock().unwrap() = true;
-    }
-
-    /// Make later saves fail, to exercise the editor's error path.
-    pub fn fail_writes(&self, error: Option<&str>) {
-        *self.fail.lock().unwrap() = error.map(str::to_owned);
-    }
-
-    fn save(&self, suggested_name: &str, png: &[u8]) -> Result<SaveOutcome, SaveError> {
-        if let Some(error) = self.fail.lock().unwrap().clone() {
-            return Err(SaveError(error));
-        }
-        if *self.cancel.lock().unwrap() {
-            return Ok(SaveOutcome::Cancelled);
-        }
-        self.saves.lock().unwrap().push(SavedPng {
-            suggested_name: suggested_name.to_owned(),
-            png: png.to_vec(),
-        });
-        Ok(SaveOutcome::Saved)
     }
 }
 

@@ -5,7 +5,6 @@ mod support;
 use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
-use gnome_annotation::clipboard::MemoryClipboardSink;
 use gnome_annotation::document::AnnotationKind;
 use gnome_annotation::editor::{Editor, EditorOptions, editor_on_key, editor_view};
 use rune::edit::{Key, KeyEvent, Mods};
@@ -14,6 +13,7 @@ use rune::{Env, Runtime, Waker};
 
 use support::{TempDir, decode_png, is_annotation_red, pixel_bounds, write_4k_fixture};
 
+use support::fakes::MemoryClipboardSink;
 fn noop_waker() -> Waker {
     Arc::new(|| {})
 }

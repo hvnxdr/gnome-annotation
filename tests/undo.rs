@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
-use gnome_annotation::clipboard::MemoryClipboardSink;
 use gnome_annotation::document::{AnnotationKind, PALETTE, Rgba};
 use gnome_annotation::editor::{Editor, EditorOptions, editor_on_key, editor_view};
 use image::RgbaImage;
@@ -16,6 +15,7 @@ use rune::{Env, Runtime, Waker};
 
 use support::{TempDir, decode_png, is_annotation_red, write_png};
 
+use support::fakes::MemoryClipboardSink;
 fn noop_waker() -> Waker {
     Arc::new(|| {})
 }

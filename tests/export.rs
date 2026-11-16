@@ -6,7 +6,7 @@ mod support;
 use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
-use gnome_annotation::clipboard::{ClipboardSink, MemoryClipboardSink, RuneClipboard};
+use gnome_annotation::clipboard::{ClipboardSink, RuneClipboard};
 use gnome_annotation::editor::{Editor, EditorOptions, editor_on_key, editor_view};
 use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
@@ -14,6 +14,7 @@ use rune::{Env, Runtime, Shell, Tx, Waker};
 
 use support::{TempDir, decode_png, write_4k_fixture};
 
+use support::fakes::MemoryClipboardSink;
 #[test]
 fn exported_pixels_are_the_preview_overlay_over_the_source() {
     let dir = TempDir::new("export-preview");

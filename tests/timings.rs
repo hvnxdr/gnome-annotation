@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use gnome_annotation::assets::FONTS;
-use gnome_annotation::clipboard::MemoryClipboardSink;
 use gnome_annotation::editor::{Editor, EditorOptions, editor_on_key, editor_view};
 use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
@@ -15,6 +14,7 @@ use rune::{Env, Runtime, Shell, Waker};
 
 use support::{TempDir, write_4k_fixture};
 
+use support::fakes::MemoryClipboardSink;
 fn headless(path: &std::path::Path) -> Runtime<Editor> {
     let options = EditorOptions::new(path, Arc::new(MemoryClipboardSink::new()));
     let mut editor = Editor::new(options).expect("load capture");
