@@ -2,6 +2,10 @@
 
 Ticket: HVN-29. Parent spec: HVN-28.
 
+> Status: this document records the framework gate. Later tickets shipped the remaining
+> editor features and ran the desktop acceptance. `docs/acceptance.md` is the current state;
+> the "still needs" notes below are historical.
+
 ## Result
 
 The automated gate passes. A 3840x2160 capture loads into a Rune editor fitted to the
@@ -82,7 +86,10 @@ That run proves Rune creates the window, decodes the 4K image, and presents the 
 The window was closed by a timeout after the measurement; no pointer or keyboard input was
 injected into the live window.
 
-### Still needs a human desktop run
+### Historical: still needed a human desktop run at the gate
+
+The desktop run has since happened. See `docs/acceptance.md` for the measured portal
+response and first frame.
 
 The parent spec's key number, portal response to first frame, cannot be measured without
 choosing a region in GNOME's UI. The app prints the pieces:
@@ -133,8 +140,9 @@ app.
 - `--capture` is one-shot. HVN-30 adds the resident daemon, socket, trigger client, and
   autostart beside it; the one-shot mode stays for manual testing.
 - The toolbar is minimal. HVN-29 shipped Select, Arrow, Text, and Copy; HVN-31 adds Line,
-  Rectangle, Ellipse, Redaction, six colours, and three stroke widths. Select has no move,
-  resize, or delete yet. Undo, redo, and save are later tickets.
+  Rectangle, Ellipse, Redaction, six colours, and three stroke widths. At the gate, Select
+  had no move, resize, or delete, and undo, redo, and save were later tickets. Those shipped
+  after the gate; `docs/acceptance.md` records the current state.
 - The editor keeps the source RGBA bytes, a premultiplied source pixmap, and a full-size
   annotation layer while annotations exist. A 4K capture peaks around 100 MB. This is
   acceptable for the gate; tiling or dirty-region rendering is a later optimisation.

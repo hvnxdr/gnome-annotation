@@ -82,7 +82,10 @@ A portal failure or an unreadable capture makes the daemon log to stderr and sho
 desktop notification. Cancelling GNOME's capture UI opens nothing.
 
 `--capture` is the separate one-shot path: its portal call runs in that process, so it does
-not coordinate with the daemon. It is kept for manual testing.
+not coordinate with the daemon. It is kept for manual testing. Its clipboard offer ends when
+the process exits, so paste the image before closing the editor. The resident daemon is the
+path that keeps a copy available for paste, because it stays running after the editor closes.
+See [`docs/export.md`](docs/export.md) for the clipboard lifetime.
 
 In the editor:
 
@@ -146,12 +149,18 @@ run.
 | `src/text.rs` | Parley shaping, swash outlines, tiny-skia text plus halo |
 | `src/render.rs` | The source-resolution annotation layer |
 | `src/export.rs` | Flatten and encode the PNG |
+| `src/save.rs` | Save target, file chooser handoff, and the memory sink |
+| `src/source.rs` | Decode the PNG into source pixels and a pixmap |
 | `src/clipboard.rs` | `ClipboardSink`, Rune clipboard, memory sink |
 | `src/cli.rs` | Modes: trigger, daemon, `--editor`, `--capture` |
 | `scripts/install.sh` | Install and uninstall |
 
-## Not yet
+## Still unverified
 
-No selection move, resize, or delete. No undo or redo. No save dialog. No desktop acceptance
-run. The document and render seams keep stable ids, a kind enum, and draw order so those can
-be added without reshaping the editor.
+Two desktop checks have not run on this machine: a multi-monitor selection, and a physical
+2x display. The 2x checks are automated, and the live acceptance run used 1.25 scale. The
+real Print keybinding and the login autostart were not installed into the live dconf store;
+the installer was exercised with the real `gsettings` binary against a temporary keyfile
+store.
+
+See [`docs/acceptance.md`](docs/acceptance.md) for the full acceptance record.
