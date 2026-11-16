@@ -244,6 +244,12 @@ impl Editor {
         self.selected
     }
 
+    /// The committed annotation layer exactly as the preview draws it, in source pixels. The
+    /// exporter composites this same pixmap, so tests compare the two directly.
+    pub fn overlay_pixmap(&self) -> Option<&tiny_skia::Pixmap> {
+        self.overlay.as_ref().map(|overlay| &overlay.pixmap)
+    }
+
     /// The topmost annotation under `point`, in source-image pixels.
     fn hit_test(&mut self, point: Point) -> Option<u64> {
         let six_pt_px = 6.0 / self.fit_scale().max(f32::EPSILON);
