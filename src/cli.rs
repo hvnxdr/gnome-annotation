@@ -16,7 +16,10 @@ Usage:
   gnome-annotation --capture           One-shot capture with GNOME's UI, then edit
   gnome-annotation --help              Show this help
 
-The installer binds Print to the trigger and adds the daemon to autostart.
+The installer binds Print to the trigger and adds the daemon to autostart. The
+resident daemon keeps running after the editor closes, so a copied image stays
+available to paste. --capture runs the portal in its own process and then exits;
+its clipboard offer ends with the process. Keep --capture for manual testing.
 
 In the editor:
   V  select tool
@@ -26,7 +29,11 @@ In the editor:
   O  ellipse tool
   X  redaction tool
   T  text tool
+  Delete  remove the selected annotation
   Enter  copy the annotated PNG at source resolution and close
+  Ctrl+S  save one PNG through the file chooser and close
+  Ctrl+Z  undo the last edit
+  Ctrl+Shift+Z  redo the last undone edit
   Esc    close without writing anything
 
 While typing: Enter commits the label, Shift+Enter adds a line, Esc discards it.

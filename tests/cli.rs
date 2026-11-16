@@ -39,6 +39,35 @@ fn unused_trigger() -> Result<(), String> {
 }
 
 #[test]
+fn usage_lists_every_editor_key_and_the_one_shot_limits() {
+    let usage = gnome_annotation::cli::USAGE;
+    for line in [
+        "  V  select tool",
+        "  L  line tool",
+        "  A  arrow tool",
+        "  R  rectangle tool",
+        "  O  ellipse tool",
+        "  X  redaction tool",
+        "  T  text tool",
+        "  Delete  remove the selected annotation",
+        "  Ctrl+S  save one PNG through the file chooser and close",
+        "  Ctrl+Z  undo the last edit",
+        "  Ctrl+Shift+Z  redo the last undone edit",
+        "  Enter  copy the annotated PNG at source resolution and close",
+        "  Esc    close without writing anything",
+    ] {
+        assert!(
+            usage.lines().any(|candidate| candidate == line),
+            "USAGE is missing the line {line:?}:\n{usage}"
+        );
+    }
+    assert!(
+        usage.contains("clipboard offer ends with the process"),
+        "USAGE says which path keeps the clipboard offer alive:\n{usage}"
+    );
+}
+
+#[test]
 fn parsing_covers_every_mode() {
     assert_eq!(parse(&[]).unwrap(), CliCommand::Trigger);
     assert_eq!(parse(&["--help".into()]).unwrap(), CliCommand::Help);
