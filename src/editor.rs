@@ -149,6 +149,10 @@ pub struct Editor {
     image: Option<rune::Image>,
     cache: Option<ImageCache>,
     document: Document,
+    /// Full-document snapshots from before each user-visible edit, newest last.
+    undo_stack: Vec<Document>,
+    /// Snapshots undone back to, newest last. Any new edit clears this.
+    redo_stack: Vec<Document>,
     selected: Option<u64>,
     gesture: Option<Gesture>,
     chrome: Option<Chrome>,
@@ -188,6 +192,8 @@ impl Editor {
             image: None,
             cache: None,
             document: Document::new(),
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
             selected: None,
             gesture: None,
             chrome: None,
@@ -237,6 +243,56 @@ impl Editor {
 
     pub fn document(&self) -> &Document {
         &self.document
+    }
+
+    /// Whether there is an edit to undo.
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    /// Whether there is an undone edit to redo.
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    /// Save the document before a user-visible change. Starting a new branch of history
+    /// discards anything that was undone.
+    fn record_edit(&mut self) {
+        self.undo_stack.push(self.document.clone());
+        self.redo_stack.clear();
+    }
+
+    /// Drop everything that points into the old document: selection, live gesture, draft,
+    /// and text field. Undo and redo redraw the canvas from the restored snapshot.
+    fn clear_transient(&mut self) {
+        self.selected = None;
+        self.gesture = None;
+        self.chrome = None;
+        self.hover = Hover::None;
+        self.draft = None;
+        self.editing = None;
+    }
+
+    fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo_stack.pop() else {
+            return false;
+        };
+        let current = std::mem::replace(&mut self.document, previous);
+        self.redo_stack.push(current);
+        self.clear_transient();
+        self.rebuild_overlay();
+        true
+    }
+
+    fn redo(&mut self) -> bool {
+        let Some(next) = self.redo_stack.pop() else {
+            return false;
+        };
+        let current = std::mem::replace(&mut self.document, next);
+        self.undo_stack.push(current);
+        self.clear_transient();
+        self.rebuild_overlay();
+        true
     }
 
     /// The selected annotation's id, if any.
@@ -462,7 +518,10 @@ impl Editor {
         let value = editing.edit.text.trim_end_matches('\n').to_owned();
         if let Some(id) = editing.id {
             if value.trim().is_empty() {
-                self.document.remove(id);
+                if self.document.get(id).is_some() {
+                    self.record_edit();
+                    self.document.remove(id);
+                }
             } else {
                 let size_px = if editing.size_changed {
                     self.text_size_px()
@@ -471,14 +530,19 @@ impl Editor {
                         .original_size_px
                         .unwrap_or_else(|| self.text_size_px())
                 };
-                self.document.set_kind(
-                    id,
-                    AnnotationKind::Text {
-                        position: editing.position,
-                        text: value,
-                        size_px,
-                    },
-                );
+                let kind = AnnotationKind::Text {
+                    position: editing.position,
+                    text: value,
+                    size_px,
+                };
+                let changed = self
+                    .document
+                    .get(id)
+                    .is_some_and(|annotation| annotation.kind != kind);
+                if changed {
+                    self.record_edit();
+                    self.document.set_kind(id, kind);
+                }
             }
             self.selected = None;
             self.gesture = None;
@@ -490,6 +554,7 @@ impl Editor {
         if value.trim().is_empty() {
             return;
         }
+        self.record_edit();
         self.document.push(
             AnnotationKind::Text {
                 position: editing.position,
@@ -562,6 +627,7 @@ impl Editor {
         } else {
             (self.color, stroke_px)
         };
+        self.record_edit();
         self.document.push(kind, color, stroke_px);
         self.rebuild_overlay();
     }
@@ -741,7 +807,11 @@ impl Editor {
         };
         let next = match gesture.mode {
             GestureMode::Move => {
-                if line_length(gesture.anchor, point) < dead_zone_px {
+                // The dead zone only protects a press that has not moved yet, so a double-click
+                // does not nudge text. Once the gesture is under way, returning to the anchor
+                // must move the annotation back.
+                let already_moved = !same_geometry(&gesture.live.kind, &gesture.origin.kind);
+                if !already_moved && line_length(gesture.anchor, point) < dead_zone_px {
                     return;
                 }
                 let dx = point[0] - gesture.anchor[0];
@@ -760,22 +830,29 @@ impl Editor {
         let Some(id) = self.selected else {
             return false;
         };
-        let removed = self.document.remove(id).is_some();
+        if self.document.get(id).is_none() {
+            self.selected = None;
+            self.gesture = None;
+            self.chrome = None;
+            self.hover = Hover::None;
+            return false;
+        }
+        self.record_edit();
+        self.document.remove(id);
         self.selected = None;
         self.gesture = None;
         self.chrome = None;
         self.hover = Hover::None;
-        if removed {
-            self.rebuild_overlay();
-        }
-        removed
+        self.rebuild_overlay();
+        true
     }
 
     fn finish_gesture(&mut self, cancelled: bool) {
         let Some(gesture) = self.gesture.take() else {
             return;
         };
-        if !cancelled {
+        if !cancelled && !same_geometry(&gesture.live.kind, &gesture.origin.kind) {
+            self.record_edit();
             self.document.set_kind(gesture.id, gesture.live.kind);
         }
         self.rebuild_overlay();
@@ -880,6 +957,14 @@ pub fn editor_on_key(editor: &mut Editor, event: &KeyEvent, tx: &mut Tx) -> bool
     if editor.editing.is_some() {
         return false;
     }
+    if event.is_command('z') {
+        if event.mods.shift {
+            editor.redo();
+        } else {
+            editor.undo();
+        }
+        return true;
+    }
     if event.mods.cmd || event.mods.ctrl || event.mods.alt {
         return false;
     }
@@ -917,6 +1002,15 @@ fn nearest_text_size_pt(size_pt: f32) -> f32 {
         .into_iter()
         .min_by(|a, b| (a - size_pt).abs().total_cmp(&(b - size_pt).abs()))
         .unwrap_or(TEXT_SIZES_PT[DEFAULT_TEXT_SIZE_INDEX])
+}
+
+/// Whether two kinds paint the same thing, ignoring the corner order a box was drawn in. A
+/// gesture that ends where it began must not add a history entry.
+fn same_geometry(a: &AnnotationKind, b: &AnnotationKind) -> bool {
+    match (a, b) {
+        (AnnotationKind::Text { .. }, AnnotationKind::Text { .. }) => a == b,
+        _ => std::mem::discriminant(a) == std::mem::discriminant(b) && a.handles() == b.handles(),
+    }
 }
 
 fn rune_color(color: Rgba) -> Color {
