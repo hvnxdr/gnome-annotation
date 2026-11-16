@@ -1,0 +1,27 @@
+[package]
+name = "gnome-annotation"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Annotate GNOME screenshots and copy the result"
+license = "MIT"
+
+[lib]
+name = "gnome_annotation"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gnome-annotation"
+path = "src/main.rs"
+
+[dependencies]
+rune = { git = "https://github.com/anomalyco/rune", rev = "47cb857795c3b1dd5097c15d6161719ae738ddda", features = ["native-file-dialog"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+png = "0.18"
+tiny-skia = { version = "0.11", default-features = false, features = ["std"] }
+parley = "0.12"
+swash = "0.2"
+zbus = { version = "6", default-features = false, features = ["tokio", "proxy"] }
+tokio = { version = "1", features = ["rt", "time"] }
+futures-util = "0.3"
+libc = "0.2"
