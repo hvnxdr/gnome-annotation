@@ -85,6 +85,12 @@ fn copies_an_unannotated_capture_at_source_size() {
     assert_eq!(writes.len(), 1, "one PNG reached the clipboard");
     let image = decode_png(&writes[0]);
     assert_eq!(image.dimensions(), (3840, 2160));
+    let source = decode_png(&std::fs::read(&fixture).expect("read the fixture"));
+    assert_eq!(
+        image.as_raw(),
+        source.as_raw(),
+        "a copy with no annotations is the source image pixel for pixel"
+    );
 }
 
 #[test]

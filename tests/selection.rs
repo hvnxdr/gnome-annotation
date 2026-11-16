@@ -12,7 +12,7 @@ use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
 use rune::{Env, Runtime, Waker};
 
-use support::{TempDir, decode_png, is_annotation_red, write_4k_fixture};
+use support::{TempDir, decode_png, is_annotation_red, pixel_bounds, write_4k_fixture};
 
 fn noop_waker() -> Waker {
     Arc::new(|| {})
@@ -411,6 +411,19 @@ fn selection_chrome_is_visible_and_never_exported() {
         );
     }
     let with_chrome = rt.state.export_png().expect("the export succeeds");
+    let with_chrome_image = decode_png(&with_chrome);
+    assert!(
+        pixel_bounds(&with_chrome_image, is_annotation_red).is_some(),
+        "the selected rectangle is in the export"
+    );
+    let chrome = |px: [u8; 4]| {
+        // The accent outline is blue-violet; the handles are white with an accent border.
+        px[2] > px[0].saturating_add(40) || (px[0] > 230 && px[1] > 230 && px[2] > 230)
+    };
+    assert!(
+        pixel_bounds(&with_chrome_image, chrome).is_none(),
+        "neither the accent outline nor the handle fill enters the export"
+    );
 
     click(&mut rt, [3000.0, 1800.0]);
     assert!(
