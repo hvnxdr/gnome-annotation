@@ -5,8 +5,8 @@ resolution.
 
 This is the v1 build after the framework gate. It has the resident daemon and Print
 trigger, the capture path, the editor window, line, arrow, rectangle, ellipse, redaction, and
-text annotations, six colours, three stroke widths, selection, PNG export, and a clipboard
-seam. Undo and the save dialog come later.
+text annotations, six colours, three stroke widths, selection, undo and redo, Save As, PNG
+export, and a clipboard seam.
 
 ## Requirements
 
@@ -97,10 +97,13 @@ In the editor:
 | `T` | text tool: click, type, `Enter` commits, `Shift+Enter` adds a line, `Esc` discards |
 | `Delete` | remove the selected annotation |
 | `Enter` | copy the annotated PNG at source resolution and close |
+| `Ctrl+S` | save one PNG through the file chooser and close |
+| `Ctrl+Z` | undo the last edit |
+| `Ctrl+Shift+Z` | redo the last undone edit |
 | `Esc` | close without writing anything |
 
-The toolbar has the same tools, six colours, three stroke widths, three text sizes, and a
-Copy button. New annotations use the selected colour, width, and text size. Redaction is
+The toolbar has the same tools, six colours, three stroke widths, three text sizes, Save,
+and Copy. New annotations use the selected colour, width, and text size. Redaction is
 always opaque black. The whole capture is fitted to the window. There is no zoom or pan.
 
 With the select tool, click an annotation to select it, drag it to move it, and drag a
@@ -115,9 +118,10 @@ cargo test --offline
 
 The editor tests drive a real Rune runtime through the explicit-image seam: they generate a
 3840x2160 fixture, draw shapes with the pointer, change the colour and stroke width, type
-and commit a label, press Enter, and assert on the PNG a memory clipboard sink received. The
-daemon tests cover the state machine, the socket, the trigger client, and the installer with
-a fake `gsettings` and a temporary HOME.
+and commit a label, undo and redo edits, save through a headless file dialog, press Enter,
+and assert on the PNG a memory clipboard sink received. The daemon tests cover the state
+machine, the socket, the trigger client, and the installer with a fake `gsettings` and a
+temporary HOME.
 
 To print the spike timings:
 
