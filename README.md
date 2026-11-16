@@ -149,9 +149,9 @@ run.
 | `src/text.rs` | Parley shaping, swash outlines, tiny-skia text plus halo |
 | `src/render.rs` | The source-resolution annotation layer |
 | `src/export.rs` | Flatten and encode the PNG |
-| `src/save.rs` | Save target, file chooser handoff, and the memory sink |
+| `src/save.rs` | Save target, file chooser handoff, and the save seam |
 | `src/source.rs` | Decode the PNG into source pixels and a pixmap |
-| `src/clipboard.rs` | `ClipboardSink`, Rune clipboard, memory sink |
+| `src/clipboard.rs` | `ClipboardSink` and the Rune clipboard |
 | `src/cli.rs` | Modes: trigger, daemon, `--editor`, `--capture` |
 | `scripts/install.sh` | Install and uninstall |
 
