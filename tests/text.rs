@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use gnome_annotation::assets::FONTS;
 use gnome_annotation::clipboard::MemoryClipboardSink;
-use gnome_annotation::document::AnnotationKind;
+use gnome_annotation::document::{AnnotationKind, PALETTE};
 use gnome_annotation::editor::{Editor, EditorOptions, Tool, editor_on_key, editor_view};
 use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
@@ -776,6 +776,66 @@ fn clicking_the_canvas_commits_the_current_text_and_starts_another() {
         panic!("expected text");
     };
     assert_eq!(text, "Two");
+}
+
+#[test]
+fn a_toolbar_swatch_keeps_the_text_field_focused_for_escape() {
+    let dir = TempDir::new("text-focus-escape");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("t"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 1200.0]);
+    rt.paste("Label");
+    rt.frame(0.0);
+
+    press(&mut rt, "color-3");
+    let field = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("text-editor") && !e.exiting)
+        .expect("the field is still open");
+    assert!(
+        field.focused,
+        "the colour swatch keeps the field focused so Esc still reaches it"
+    );
+
+    rt.key(escape());
+    rt.frame(0.0);
+    assert!(text_field(&rt).is_none(), "Esc cancels the edit");
+    assert!(
+        rt.state.document().is_empty(),
+        "the cancelled label is not added"
+    );
+}
+
+#[test]
+fn a_toolbar_swatch_keeps_the_text_field_focused_for_enter() {
+    let dir = TempDir::new("text-focus-enter");
+    let fixture = write_4k_fixture(dir.path());
+    let (_sink, mut rt) = headless_editor(&fixture);
+
+    rt.key(key_text("t"));
+    rt.frame(0.0);
+    click(&mut rt, [900.0, 1200.0]);
+    rt.paste("Label");
+    rt.frame(0.0);
+
+    press(&mut rt, "color-3");
+    rt.key(enter());
+    rt.frame(0.0);
+
+    let annotations = rt.state.document().annotations();
+    assert_eq!(annotations.len(), 1, "Enter commits the label");
+    let AnnotationKind::Text { text, .. } = &annotations[0].kind else {
+        panic!("expected text");
+    };
+    assert_eq!(text, "Label");
+    assert_eq!(
+        annotations[0].color, PALETTE[3],
+        "the label takes the colour picked while typing"
+    );
 }
 
 #[test]

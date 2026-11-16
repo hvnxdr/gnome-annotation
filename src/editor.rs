@@ -1337,6 +1337,8 @@ fn color_swatch<S: HostsEditor + 'static>(index: usize, selected: bool, theme: &
         .border(ring_width, ring)
         .hover(rune_color(color))
         .press(rune_color(color))
+        .preserve_focus_on_press(true)
+        .keeps_text_selection()
         .on_press(move |state: &mut S| {
             if let Some(editor) = state.editor_mut() {
                 editor.set_color(PALETTE[index]);
@@ -1367,6 +1369,8 @@ fn width_button<S: HostsEditor + 'static>(
         .fill(fill)
         .hover(if selected { accent } else { theme.hover })
         .press(if selected { accent } else { theme.press })
+        .preserve_focus_on_press(true)
+        .keeps_text_selection()
         .center()
         .on_press(move |state: &mut S| {
             if let Some(editor) = state.editor_mut() {
