@@ -12,7 +12,7 @@ use gnome_annotation::editor::{
 };
 use rune::edit::{Key, KeyEvent, Mods};
 use rune::text::TextSystem;
-use rune::{Env, Runtime, Tx, Waker};
+use rune::{Env, Runtime, Waker};
 use support::{TempDir, write_4k_fixture};
 
 struct Slot {
@@ -50,13 +50,7 @@ fn runtime(state: Slot) -> Runtime<Slot> {
         Env::new(true, 1.0),
         TextSystem::new(FONTS, ("Inter", "Inter")),
     );
-    fn on_key(state: &mut Slot, event: &KeyEvent, tx: &mut Tx) -> bool {
-        match state.editor.as_mut() {
-            Some(editor) => editor_on_key(editor, event, tx),
-            None => false,
-        }
-    }
-    rt.on_key = Some(on_key);
+    rt.on_key = Some(editor_on_key);
     rt.frame(0.0);
     rt
 }

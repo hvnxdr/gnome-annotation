@@ -99,10 +99,7 @@ fn daemon_on_close(state: &mut DaemonState, _tx: &mut Tx) {
 }
 
 fn daemon_on_key(state: &mut DaemonState, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
-    match state.editor.as_mut() {
-        Some(editor) => editor_on_key(editor, event, tx),
-        None => false,
-    }
+    editor_on_key(state, event, tx)
 }
 
 pub fn run_daemon() -> Result<(), String> {

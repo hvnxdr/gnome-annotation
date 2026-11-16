@@ -22,6 +22,7 @@ use crate::document::{
 };
 use crate::export::{self, ExportError};
 use crate::render::{render_annotations, render_annotations_excluding};
+use crate::save::{SaveTarget, save_and_close};
 use crate::source::{LoadError, SourceImage};
 use crate::text::TextRenderer;
 
@@ -36,6 +37,7 @@ const HANDLE_SIZE_PT: f32 = 8.0;
 pub struct EditorOptions {
     pub image_path: PathBuf,
     pub clipboard: Arc<dyn ClipboardSink>,
+    pub save: SaveTarget,
     pub color: Rgba,
     pub width_pt: f32,
     pub text_size_pt: f32,
@@ -46,10 +48,17 @@ impl EditorOptions {
         Self {
             image_path: image_path.into(),
             clipboard,
+            save: SaveTarget::Dialog,
             color: Rgba::ANNOTATION_RED,
             width_pt: STROKE_WIDTHS_PT[1],
             text_size_pt: TEXT_SIZES_PT[DEFAULT_TEXT_SIZE_INDEX],
         }
+    }
+
+    /// Point saving at a test sink instead of the FileChooser portal.
+    pub fn with_save(mut self, save: SaveTarget) -> Self {
+        self.save = save;
+        self
     }
 }
 
@@ -144,6 +153,8 @@ struct Chrome {
 }
 
 pub struct Editor {
+    /// The capture GNOME wrote. Save reads its stem for the suggested name and never writes it.
+    image_path: PathBuf,
     source: SourceImage,
     source_pixmap: tiny_skia::Pixmap,
     image: Option<rune::Image>,
@@ -165,6 +176,7 @@ pub struct Editor {
     last_point: Point,
     overlay: Option<Overlay>,
     clipboard: Arc<dyn ClipboardSink>,
+    save: SaveTarget,
     color: Rgba,
     width_pt: f32,
     text_size_pt: f32,
@@ -187,6 +199,7 @@ impl Editor {
             copy_ms: None,
         };
         Ok(Self {
+            image_path: options.image_path,
             source,
             source_pixmap,
             image: None,
@@ -204,6 +217,7 @@ impl Editor {
             last_point: [0.0, 0.0],
             overlay: None,
             clipboard: options.clipboard,
+            save: options.save,
             color: options.color,
             width_pt: options.width_pt,
             text_size_pt: options.text_size_pt,
@@ -405,6 +419,28 @@ impl Editor {
 
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
+    }
+
+    /// Record an inline error from a boundary the editor cannot own (the save dialog).
+    pub(crate) fn set_error(&mut self, error: impl Into<String>) {
+        self.error = Some(error.into());
+    }
+
+    /// The name the chooser suggests: the capture stem plus `-annotated.png`. The output is
+    /// always PNG, whatever extension the capture had.
+    pub fn suggested_save_name(&self) -> String {
+        let stem = self
+            .image_path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| "capture".to_owned());
+        format!("{stem}-annotated.png")
+    }
+
+    /// Whether saves go to the portal or to a test sink.
+    pub(crate) fn save_target(&self) -> &SaveTarget {
+        &self.save
     }
 
     /// Flatten the source and annotations and encode one PNG. An adjustment in flight keeps
@@ -953,7 +989,23 @@ impl HostsEditor for Editor {
     }
 }
 
-pub fn editor_on_key(editor: &mut Editor, event: &KeyEvent, tx: &mut Tx) -> bool {
+pub fn editor_on_key<S: HostsEditor + 'static>(
+    state: &mut S,
+    event: &KeyEvent,
+    tx: &mut Tx,
+) -> bool {
+    if event.is_command('s') {
+        let Some(editor) = state.editor_mut() else {
+            return false;
+        };
+        // A label being typed is part of the document the user asked to save.
+        editor.commit_text();
+        save_and_close(state, tx);
+        return true;
+    }
+    let Some(editor) = state.editor_mut() else {
+        return false;
+    };
     if editor.editing.is_some() {
         return false;
     }
@@ -1610,7 +1662,7 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
     toolbar = toolbar
         .child(rune::spacer())
         .child(
-            text("Enter copies · Esc cancels")
+            text("Esc discards")
                 .font(type_::LABEL)
                 .color(theme.text_secondary),
         )
@@ -1623,6 +1675,27 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                 .color(tok::accent(2, dark)),
         );
     }
+    toolbar = toolbar.child(
+        el().key("save")
+            .role("button")
+            .label("Save (Ctrl+S)")
+            .focusable(true)
+            .cursor(rune::Cursor::Pointer)
+            .h(32.0)
+            .px(space::S3)
+            .radius(tok::radius::SM)
+            .fill(theme.control_track)
+            .hover(theme.hover)
+            .press(theme.press)
+            .center_y()
+            .on_press_tx(|state: &mut S, tx: &mut Tx| {
+                if let Some(editor) = state.editor_mut() {
+                    editor.commit_text();
+                }
+                save_and_close(state, tx);
+            })
+            .child(text("Save").font(type_::LABEL).color(theme.text)),
+    );
     toolbar = toolbar.child(
         el().key("copy")
             .role("button")
