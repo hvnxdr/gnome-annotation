@@ -279,28 +279,19 @@ impl AnnotationKind {
     /// handle does not exist or the result would be too small to keep.
     pub fn with_handle(&self, handle: usize, point: Point) -> Option<Self> {
         match self {
-            Self::Line { start, end } => match handle {
-                0 => (line_length(point, *end) >= MIN_DRAG_PX).then_some(Self::Line {
-                    start: point,
-                    end: *end,
-                }),
-                1 => (line_length(*start, point) >= MIN_DRAG_PX).then_some(Self::Line {
-                    start: *start,
-                    end: point,
-                }),
-                _ => None,
-            },
-            Self::Arrow { start, end } => match handle {
-                0 => (line_length(point, *end) >= MIN_DRAG_PX).then_some(Self::Arrow {
-                    start: point,
-                    end: *end,
-                }),
-                1 => (line_length(*start, point) >= MIN_DRAG_PX).then_some(Self::Arrow {
-                    start: *start,
-                    end: point,
-                }),
-                _ => None,
-            },
+            Self::Line { start, end } | Self::Arrow { start, end } => {
+                let fixed = match handle {
+                    0 => *end,
+                    1 => *start,
+                    _ => return None,
+                };
+                if line_length(fixed, point) < MIN_DRAG_PX {
+                    return None;
+                }
+                Some(self.map_endpoints(|index, endpoint| {
+                    if index == handle { point } else { endpoint }
+                }))
+            }
             Self::Rectangle { start, end }
             | Self::Ellipse { start, end }
             | Self::Redaction { start, end } => {
@@ -324,34 +315,39 @@ impl AnnotationKind {
 
     /// The same kind shifted by `dx`/`dy` in source-image pixels.
     pub fn translated(&self, dx: f32, dy: f32) -> Self {
-        let shift = |point: Point| [point[0] + dx, point[1] + dy];
+        self.map_endpoints(|_, point| [point[0] + dx, point[1] + dy])
+    }
+
+    /// Rebuild this kind with each endpoint mapped: index 0 is the start (or a text anchor),
+    /// index 1 is the end. Text keeps its string and size.
+    fn map_endpoints(&self, mut map: impl FnMut(usize, Point) -> Point) -> Self {
         match self {
             Self::Line { start, end } => Self::Line {
-                start: shift(*start),
-                end: shift(*end),
+                start: map(0, *start),
+                end: map(1, *end),
             },
             Self::Arrow { start, end } => Self::Arrow {
-                start: shift(*start),
-                end: shift(*end),
+                start: map(0, *start),
+                end: map(1, *end),
             },
             Self::Rectangle { start, end } => Self::Rectangle {
-                start: shift(*start),
-                end: shift(*end),
+                start: map(0, *start),
+                end: map(1, *end),
             },
             Self::Ellipse { start, end } => Self::Ellipse {
-                start: shift(*start),
-                end: shift(*end),
+                start: map(0, *start),
+                end: map(1, *end),
             },
             Self::Redaction { start, end } => Self::Redaction {
-                start: shift(*start),
-                end: shift(*end),
+                start: map(0, *start),
+                end: map(1, *end),
             },
             Self::Text {
                 position,
                 text,
                 size_px,
             } => Self::Text {
-                position: shift(*position),
+                position: map(0, *position),
                 text: text.clone(),
                 size_px: *size_px,
             },
