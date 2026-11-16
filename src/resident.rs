@@ -43,6 +43,9 @@ struct RuneHost {
     handle: AppHandle<DaemonState>,
     clipboard: Arc<dyn ClipboardSink>,
     waker: Arc<Mutex<Option<Waker>>>,
+    /// Set when the portal returns and the editor is about to open. `on_ready` reads it after
+    /// the first frame so the log reports the full portal-to-first-frame path.
+    first_frame_at: Arc<Mutex<Option<Instant>>>,
 }
 
 impl RuneHost {
@@ -59,6 +62,7 @@ impl RuneHost {
 
 impl CaptureHost for RuneHost {
     fn open_editor(&self, path: &Path) -> Result<(), String> {
+        *self.first_frame_at.lock().unwrap() = Some(Instant::now());
         let waker = self
             .wait_for_waker()
             .ok_or_else(|| "the daemon is not ready to open a window".to_owned())?;
@@ -112,11 +116,29 @@ pub fn run_daemon() -> Result<(), String> {
     spec.setup = Some(daemon_setup);
     spec.on_key = Some(daemon_on_key);
 
-    let app = rune::App::new(spec).windowless().on_close(daemon_on_close);
+    let first_frame_at: Arc<Mutex<Option<Instant>>> = Arc::default();
+    let app = rune::App::new(spec)
+        .windowless()
+        .on_close(daemon_on_close)
+        // The editor holds the 4K buffers and the GPU device. Drop the device while the
+        // daemon is idle so a closed window does not leave the editor's peak resident.
+        .release_gpu_when_closed()
+        .on_ready({
+            let first_frame_at = first_frame_at.clone();
+            move |_| {
+                if let Some(started) = first_frame_at.lock().unwrap().take() {
+                    eprintln!(
+                        "gnome-annotation: first frame ready {:.1} ms after the portal returned",
+                        started.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+            }
+        });
     let host = Arc::new(RuneHost {
         handle: app.handle(),
         clipboard: Arc::new(RuneClipboard),
         waker: waker.clone(),
+        first_frame_at,
     });
     let daemon = Arc::new(Daemon::new(
         Arc::new(PortalScreenshot),
