@@ -26,11 +26,15 @@ struct Installer {
 
 impl Installer {
     fn new(name: &str, initial: &str) -> Self {
+        Self::with_bin_dir(name, initial, "bin")
+    }
+
+    fn with_bin_dir(name: &str, initial: &str, bin_dir: &str) -> Self {
         let dir = TempDir::new(name);
         let home = dir.path().join("home");
         let data = dir.path().join("data");
         let config = dir.path().join("config");
-        let bin = dir.path().join("bin");
+        let bin = dir.path().join(bin_dir);
         let fake_dir = dir.path().join("fake-gsettings");
         for path in [&home, &data, &config, &bin, &fake_dir] {
             fs::create_dir_all(path).expect("create fixture directory");
@@ -170,6 +174,37 @@ fn install_writes_the_binary_entries_and_keybinding() {
             bin.display()
         )),
         "the Print binding runs the trigger client: {log}"
+    );
+}
+
+#[test]
+fn a_bin_directory_with_a_space_keeps_the_print_command_quoted() {
+    let fixture = Installer::with_bin_dir(
+        "install-space",
+        &format!("['{CUSTOM0}']"),
+        "bin dir",
+    );
+    assert_success(&fixture.run(&[]));
+
+    let bin = fixture.bin_path();
+    assert!(
+        bin.display().to_string().contains(' '),
+        "the fixture bin path has a space: {}",
+        bin.display()
+    );
+    let desktop = fs::read_to_string(fixture.desktop()).expect("desktop entry");
+    assert!(
+        desktop.contains(&format!("Exec=\"{}\"", bin.display())),
+        "the desktop entry quotes the binary path: {desktop}"
+    );
+    let log = fixture.log();
+    assert!(
+        log.contains(&format!("command \"{}\" --trigger", bin.display())),
+        "the Print command quotes the binary path: {log}"
+    );
+    assert!(
+        !log.contains(&format!("command {} --trigger", bin.display())),
+        "the unquoted path never reaches the keybinding: {log}"
     );
 }
 

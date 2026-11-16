@@ -162,10 +162,12 @@ install_keybinding() {
         ENTRIES+=("$KEYBINDING_PATH")
         "$GSETTINGS" set "$MEDIA_SCHEMA" "$MEDIA_KEY" "$(format_keybindings)"
     fi
+    local command
+    command="$(desktop_exec "$BIN_DIR/$BIN_NAME") --trigger"
     "$GSETTINGS" set "$KEYBINDING_SCHEMA" name "$BIN_NAME"
-    "$GSETTINGS" set "$KEYBINDING_SCHEMA" command "$BIN_DIR/$BIN_NAME --trigger"
+    "$GSETTINGS" set "$KEYBINDING_SCHEMA" command "$command"
     "$GSETTINGS" set "$KEYBINDING_SCHEMA" binding "Print"
-    printf 'install: Print -> %s --trigger\n' "$BIN_DIR/$BIN_NAME"
+    printf 'install: Print -> %s\n' "$command"
 }
 
 remove_keybinding() {
