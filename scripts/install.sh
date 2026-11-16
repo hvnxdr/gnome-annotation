@@ -129,7 +129,7 @@ install_desktop_entry() {
 Type=Application
 Name=$BIN_NAME
 Comment=Annotate a GNOME screenshot
-Exec=$BIN_NAME
+Exec=$(desktop_exec "$BIN_DIR/$BIN_NAME")
 Terminal=false
 StartupWMClass=$APP_ID
 Categories=Graphics;Utility;

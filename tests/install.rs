@@ -140,7 +140,10 @@ fn install_writes_the_binary_entries_and_keybinding() {
     assert_eq!(mode, 0o755, "the binary is installed executable");
 
     let desktop = fs::read_to_string(fixture.desktop()).expect("desktop entry");
-    assert!(desktop.contains("Exec=gnome-annotation"));
+    assert!(
+        desktop.contains(&format!("Exec={}", bin.display())),
+        "the desktop entry runs the installed binary: {desktop}"
+    );
     assert!(desktop.contains("Name=gnome-annotation"));
     assert!(desktop.contains("Comment=Annotate a GNOME screenshot"));
     assert!(desktop.contains("StartupWMClass=dev.hvnxdr.GnomeAnnotation"));
