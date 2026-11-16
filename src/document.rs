@@ -210,6 +210,14 @@ pub const PALETTE: [Rgba; 6] = [
 /// The three stroke widths offered by the toolbar, in screen points at the current fit scale.
 pub const STROKE_WIDTHS_PT: [f32; 3] = [2.0, 4.0, 8.0];
 
+/// The three text sizes offered by the toolbar, in screen points at the current fit scale.
+/// A text annotation stores its size in source-image pixels, so it keeps the same on-screen
+/// size when the window changes.
+pub const TEXT_SIZES_PT: [f32; 3] = [12.0, 18.0, 28.0];
+
+/// Medium: the size selected for a new text annotation.
+pub const DEFAULT_TEXT_SIZE_INDEX: usize = 1;
+
 /// One annotation. The kind carries the geometry; every kind shares colour and stroke.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Annotation {

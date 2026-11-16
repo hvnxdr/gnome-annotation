@@ -5,8 +5,8 @@ resolution.
 
 This is the v1 build after the framework gate. It has the resident daemon and Print
 trigger, the capture path, the editor window, line, arrow, rectangle, ellipse, redaction, and
-text annotations, six colours, three stroke widths, PNG export, and a clipboard seam.
-Selection, undo, and the save dialog come later.
+text annotations, six colours, three stroke widths, selection, PNG export, and a clipboard
+seam. Undo and the save dialog come later.
 
 ## Requirements
 
@@ -88,19 +88,24 @@ In the editor:
 
 | Key | Action |
 | --- | --- |
-| `V` | select tool (no move or resize yet) |
+| `V` | select tool: click to select, drag to move, drag a handle to resize |
 | `L` | line tool: drag to draw |
 | `A` | arrow tool: drag to draw |
 | `R` | rectangle tool: drag out the box |
 | `O` | ellipse tool: drag out the box |
 | `X` | redaction tool: drag out an opaque black box |
 | `T` | text tool: click, type, `Enter` commits, `Shift+Enter` adds a line, `Esc` discards |
+| `Delete` | remove the selected annotation |
 | `Enter` | copy the annotated PNG at source resolution and close |
 | `Esc` | close without writing anything |
 
-The toolbar has the same tools, six colours, three stroke widths, and a Copy button. New
-annotations use the selected colour and width; redaction is always opaque black. The whole
-capture is fitted to the window. There is no zoom or pan.
+The toolbar has the same tools, six colours, three stroke widths, three text sizes, and a
+Copy button. New annotations use the selected colour, width, and text size. Redaction is
+always opaque black. The whole capture is fitted to the window. There is no zoom or pan.
+
+With the select tool, click an annotation to select it, drag it to move it, and drag a
+handle to resize it. Press `Delete` to remove it. Double-click committed text to edit it
+again. Selection outlines and handles never appear in the copy.
 
 ## Test
 

@@ -57,6 +57,75 @@ fn glyphs_are_upright_and_the_halo_surrounds_the_fill() {
 }
 
 #[test]
+fn a_light_fill_gets_a_dark_halo() {
+    let mut renderer = TextRenderer::new();
+    let raster = renderer
+        .rasterize("H", 64.0, Rgba::ANNOTATION_YELLOW)
+        .expect("text raster");
+
+    let mut fill = false;
+    let mut halo = false;
+    for px in raster.pixmap.pixels() {
+        let c = px.demultiply();
+        let [r, g, b, a] = [c.red(), c.green(), c.blue(), c.alpha()];
+        fill |= r > 200 && g > 170 && b < 100 && a > 200;
+        halo |= r < 30 && g < 30 && b < 30 && a > 180;
+    }
+    assert!(fill, "the yellow fill is drawn");
+    assert!(halo, "yellow text gets a dark halo");
+}
+
+#[test]
+fn a_dark_fill_gets_a_light_halo() {
+    let mut renderer = TextRenderer::new();
+    let raster = renderer
+        .rasterize("H", 64.0, Rgba::ANNOTATION_BLUE)
+        .expect("text raster");
+
+    let mut fill = false;
+    let mut halo = false;
+    for px in raster.pixmap.pixels() {
+        let c = px.demultiply();
+        let [r, g, b, a] = [c.red(), c.green(), c.blue(), c.alpha()];
+        fill |= b > 150 && r < 120 && a > 200;
+        halo |= r > 220 && g > 220 && b > 220 && a > 180;
+    }
+    assert!(fill, "the blue fill is drawn");
+    assert!(halo, "blue text gets a light halo");
+}
+
+#[test]
+fn a_long_string_lays_out_on_one_line() {
+    let mut renderer = TextRenderer::new();
+    let long = "M".repeat(120);
+    let raster = renderer
+        .rasterize(&long, 64.0, Rgba::ANNOTATION_RED)
+        .expect("text raster");
+    assert!(
+        raster.pixmap.width() > 64 * 50,
+        "the long line is not squeezed: {}x{}",
+        raster.pixmap.width(),
+        raster.pixmap.height()
+    );
+    assert!(
+        (raster.pixmap.height() as f32) < 64.0 * 1.5,
+        "120 characters stay one line tall: {}x{}",
+        raster.pixmap.width(),
+        raster.pixmap.height()
+    );
+
+    let two_lines = renderer
+        .rasterize("M\nM", 64.0, Rgba::ANNOTATION_RED)
+        .expect("text raster");
+    assert!(
+        (two_lines.pixmap.height() as f32) > 64.0 * 1.5,
+        "an explicit newline adds a line: {}x{}",
+        two_lines.pixmap.width(),
+        two_lines.pixmap.height()
+    );
+}
+
+#[test]
 fn empty_text_has_no_raster() {
     let mut renderer = TextRenderer::new();
     assert!(renderer.rasterize("", 48.0, Rgba::ANNOTATION_RED).is_none());

@@ -16,8 +16,9 @@ use rune::{
 use crate::assets::ANNOTATION_FAMILY;
 use crate::clipboard::ClipboardSink;
 use crate::document::{
-    Annotation, AnnotationKind, Document, MIN_DRAG_PX, PALETTE, Point, Rect, Rgba,
-    STROKE_WIDTHS_PT, arrow_geometry, crop_segment, ellipse_points, line_length, point_in_rect,
+    Annotation, AnnotationKind, DEFAULT_TEXT_SIZE_INDEX, Document, MIN_DRAG_PX, PALETTE, Point,
+    Rect, Rgba, STROKE_WIDTHS_PT, TEXT_SIZES_PT, arrow_geometry, crop_segment, ellipse_points,
+    line_length, point_in_rect,
 };
 use crate::export::{self, ExportError};
 use crate::render::{render_annotations, render_annotations_excluding};
@@ -37,7 +38,7 @@ pub struct EditorOptions {
     pub clipboard: Arc<dyn ClipboardSink>,
     pub color: Rgba,
     pub width_pt: f32,
-    pub text_size_px: f32,
+    pub text_size_pt: f32,
 }
 
 impl EditorOptions {
@@ -47,7 +48,7 @@ impl EditorOptions {
             clipboard,
             color: Rgba::ANNOTATION_RED,
             width_pt: STROKE_WIDTHS_PT[1],
-            text_size_px: 48.0,
+            text_size_pt: TEXT_SIZES_PT[DEFAULT_TEXT_SIZE_INDEX],
         }
     }
 }
@@ -70,8 +71,25 @@ pub struct Timings {
 }
 
 struct Editing {
+    /// The annotation being re-edited, or `None` for a new one.
+    id: Option<u64>,
     position: Point,
+    /// The size the annotation already has in source pixels. A re-edit keeps it unless the
+    /// user picks another toolbar size.
+    original_size_px: Option<f32>,
+    size_changed: bool,
     edit: TextEdit,
+}
+
+impl Editing {
+    /// The size the live field draws at. A re-edit keeps the annotation's own on-screen
+    /// size until the user picks a toolbar size.
+    fn live_size_pt(&self, selected_pt: f32, fit_scale: f32) -> f32 {
+        match self.original_size_px {
+            Some(size_px) if !self.size_changed => size_px * fit_scale,
+            _ => selected_pt,
+        }
+    }
 }
 
 struct Draft {
@@ -138,11 +156,14 @@ pub struct Editor {
     tool: Tool,
     draft: Option<Draft>,
     editing: Option<Editing>,
+    /// The latest pointer position in source-image pixels. `on_double_press` carries no
+    /// coordinates, so it reads this to find the text under the second click.
+    last_point: Point,
     overlay: Option<Overlay>,
     clipboard: Arc<dyn ClipboardSink>,
     color: Rgba,
     width_pt: f32,
-    text_size_px: f32,
+    text_size_pt: f32,
     text_renderer: TextRenderer,
     canvas_pt: [f32; 2],
     error: Option<String>,
@@ -174,11 +195,12 @@ impl Editor {
             tool: Tool::Select,
             draft: None,
             editing: None,
+            last_point: [0.0, 0.0],
             overlay: None,
             clipboard: options.clipboard,
             color: options.color,
             width_pt: options.width_pt,
-            text_size_px: options.text_size_px,
+            text_size_pt: options.text_size_pt,
             text_renderer: TextRenderer::new(),
             canvas_pt: [0.0, 0.0],
             error: None,
@@ -276,6 +298,10 @@ impl Editor {
         self.width_pt
     }
 
+    pub fn text_size_pt(&self) -> f32 {
+        self.text_size_pt
+    }
+
     pub fn set_color(&mut self, color: Rgba) {
         self.color = color;
     }
@@ -284,9 +310,22 @@ impl Editor {
         self.width_pt = width_pt;
     }
 
+    pub fn set_text_size_pt(&mut self, size_pt: f32) {
+        self.text_size_pt = size_pt;
+        if let Some(editing) = &mut self.editing {
+            editing.size_changed = true;
+        }
+    }
+
     /// The selected screen-point width converted to source-image pixels.
     fn stroke_px(&self) -> f32 {
         self.width_pt / self.fit_scale()
+    }
+
+    /// The selected text size in screen points converted to source-image pixels. Storing
+    /// pixels keeps a label's on-screen size after the window resizes.
+    fn text_size_px(&self) -> f32 {
+        self.text_size_pt / self.fit_scale()
     }
 
     pub fn set_tool(&mut self, tool: Tool) {
@@ -358,7 +397,56 @@ impl Editor {
     fn begin_text(&mut self, position: Point) {
         let mut edit = TextEdit::new("");
         edit.focused = true;
-        self.editing = Some(Editing { position, edit });
+        self.editing = Some(Editing {
+            id: None,
+            position,
+            original_size_px: None,
+            size_changed: false,
+            edit,
+        });
+    }
+
+    /// Reopen a committed text annotation for editing. The Text tool is for placing new
+    /// labels; the Select tool owns this double-click edit.
+    fn begin_text_edit(&mut self) -> bool {
+        if self.tool != Tool::Select {
+            return false;
+        }
+        let Some(id) = self.hit_test(self.last_point) else {
+            return false;
+        };
+        let Some(annotation) = self.document.get(id).cloned() else {
+            return false;
+        };
+        let AnnotationKind::Text {
+            position,
+            text,
+            size_px,
+        } = annotation.kind
+        else {
+            return false;
+        };
+        let mut edit = TextEdit::new(text);
+        edit.focused = true;
+        self.text_size_pt = nearest_text_size_pt(size_px * self.fit_scale());
+        self.editing = Some(Editing {
+            id: Some(id),
+            position,
+            original_size_px: Some(size_px),
+            size_changed: false,
+            edit,
+        });
+        self.selected = None;
+        self.gesture = None;
+        self.chrome = None;
+        self.hover = Hover::None;
+        self.draft = None;
+        self.rebuild_overlay_excluding(Some(id));
+        true
+    }
+
+    fn on_canvas_double_press(&mut self) {
+        self.begin_text_edit();
     }
 
     fn commit_text(&mut self) {
@@ -366,6 +454,33 @@ impl Editor {
             return;
         };
         let value = editing.edit.text.trim_end_matches('\n').to_owned();
+        if let Some(id) = editing.id {
+            if value.trim().is_empty() {
+                self.document.remove(id);
+            } else {
+                let size_px = if editing.size_changed {
+                    self.text_size_px()
+                } else {
+                    editing
+                        .original_size_px
+                        .unwrap_or_else(|| self.text_size_px())
+                };
+                self.document.set_kind(
+                    id,
+                    AnnotationKind::Text {
+                        position: editing.position,
+                        text: value,
+                        size_px,
+                    },
+                );
+            }
+            self.selected = None;
+            self.gesture = None;
+            self.chrome = None;
+            self.hover = Hover::None;
+            self.rebuild_overlay();
+            return;
+        }
         if value.trim().is_empty() {
             return;
         }
@@ -373,7 +488,7 @@ impl Editor {
             AnnotationKind::Text {
                 position: editing.position,
                 text: value,
-                size_px: self.text_size_px,
+                size_px: self.text_size_px(),
             },
             self.color,
             self.stroke_px(),
@@ -382,7 +497,12 @@ impl Editor {
     }
 
     fn cancel_text(&mut self) {
-        self.editing = None;
+        let Some(editing) = self.editing.take() else {
+            return;
+        };
+        if editing.id.is_some() {
+            self.rebuild_overlay();
+        }
     }
 
     fn finish_draft(&mut self) {
@@ -607,11 +727,17 @@ impl Editor {
     }
 
     fn move_gesture(&mut self, point: Point) {
+        // A click that pairs into a double-click may jitter by the system's click slop.
+        // Keep such a press from nudging text before it reopens for editing.
+        let dead_zone_px = 4.0 / self.fit_scale().max(f32::EPSILON);
         let Some(gesture) = &mut self.gesture else {
             return;
         };
         let next = match gesture.mode {
             GestureMode::Move => {
+                if line_length(gesture.anchor, point) < dead_zone_px {
+                    return;
+                }
                 let dx = point[0] - gesture.anchor[0];
                 let dy = point[1] - gesture.anchor[1];
                 Some(gesture.origin.kind.translated(dx, dy))
@@ -653,14 +779,15 @@ impl Editor {
     /// Track the pointer over the canvas so its cursor can say Move or Grab. Changing only
     /// when the class changes keeps ordinary pointer motion from rebuilding the view.
     fn on_canvas_pointer_move(&mut self, local: [f32; 2]) {
-        if self.tool != Tool::Select || self.gesture.is_some() {
-            return;
-        }
         let scale = self.canvas_pt[0] / self.source.width as f32;
         if scale <= 0.0 {
             return;
         }
         let point = [local[0] / scale, local[1] / scale];
+        self.last_point = point;
+        if self.tool != Tool::Select || self.gesture.is_some() {
+            return;
+        }
         let hover = if self
             .chrome
             .as_ref()
@@ -679,18 +806,16 @@ impl Editor {
     }
 
     fn on_canvas_drag(&mut self, drag: &Drag) {
+        let point = self.drag_point(drag);
+        self.last_point = point;
         match self.tool {
-            Tool::Select => {
-                let point = self.drag_point(drag);
-                match drag.phase {
-                    Phase::Down => self.begin_select(point),
-                    Phase::Move => self.move_gesture(point),
-                    Phase::Up => self.finish_gesture(drag.cancelled()),
-                }
-            }
+            Tool::Select => match drag.phase {
+                Phase::Down => self.begin_select(point),
+                Phase::Move => self.move_gesture(point),
+                Phase::Up => self.finish_gesture(drag.cancelled()),
+            },
             Tool::Line | Tool::Arrow | Tool::Rectangle | Tool::Ellipse | Tool::Redaction => {
                 let tool = self.tool;
-                let point = self.drag_point(drag);
                 match drag.phase {
                     Phase::Down => {
                         self.draft = Some(Draft {
@@ -721,7 +846,7 @@ impl Editor {
                     if self.editing.is_some() {
                         self.commit_text();
                     }
-                    self.begin_text(self.drag_point(drag));
+                    self.begin_text(point);
                 }
             }
         }
@@ -777,6 +902,15 @@ pub fn editor_on_key(editor: &mut Editor, event: &KeyEvent, tx: &mut Tx) -> bool
         }
         _ => false,
     }
+}
+
+/// The toolbar size closest to a text's current on-screen size, so re-editing shows the
+/// button that matches the label when the window has not changed.
+fn nearest_text_size_pt(size_pt: f32) -> f32 {
+    TEXT_SIZES_PT
+        .into_iter()
+        .min_by(|a, b| (a - size_pt).abs().total_cmp(&(b - size_pt).abs()))
+        .unwrap_or(TEXT_SIZES_PT[DEFAULT_TEXT_SIZE_INDEX])
 }
 
 fn rune_color(color: Rgba) -> Color {
@@ -1044,6 +1178,44 @@ fn width_button<S: HostsEditor + 'static>(
         )
 }
 
+fn text_size_button<S: HostsEditor + 'static>(
+    index: usize,
+    selected: bool,
+    theme: &tok::Theme,
+    accent: Color,
+) -> El {
+    let size_pt = TEXT_SIZES_PT[index];
+    let fill = if selected {
+        accent
+    } else {
+        theme.control_track
+    };
+    let ink = if selected { Color::WHITE } else { theme.text };
+    el().key(format!("text-size-{index}"))
+        .role("button")
+        .label(format!("Text size {size_pt} points"))
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .size(30.0, 30.0)
+        .radius(tok::radius::SM)
+        .fill(fill)
+        .hover(if selected { accent } else { theme.hover })
+        .press(if selected { accent } else { theme.press })
+        .preserve_focus_on_press(true)
+        .keeps_text_selection()
+        .center()
+        .on_press(move |state: &mut S| {
+            if let Some(editor) = state.editor_mut() {
+                editor.set_text_size_pt(size_pt);
+            }
+        })
+        .child(
+            text(format!("{}", size_pt as u32))
+                .font(type_::LABEL)
+                .color(ink),
+        )
+}
+
 pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
     let Some(editor) = state.editor() else {
         // The daemon is idle: no window is open, so the root is empty.
@@ -1162,13 +1334,19 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
         } else {
             1.0
         };
-        let font_size = (editor.text_size_px * scale).clamp(9.0, 96.0);
+        let font_size = editing
+            .live_size_pt(editor.text_size_pt, editor.fit_scale())
+            .clamp(9.0, 96.0);
+        let x_pt = editing.position[0] * scale;
+        // Give the field the rest of the canvas (capped) so a normal label is typed on one
+        // line. The committed text never wraps; this only keeps the live field from doing so.
+        let field_width = (editor.canvas_pt[0] - x_pt - 8.0).clamp(200.0, 960.0);
         let style = TextStyle::new(font_size, 400.0).family(Family::Named(ANNOTATION_FAMILY));
         canvas_el = canvas_el.child(
             text_input(&editing.edit, style)
                 .key("text-editor")
-                .absolute(editing.position[0] * scale, editing.position[1] * scale)
-                .w(420.0)
+                .absolute(x_pt, editing.position[1] * scale)
+                .w(field_width)
                 .min_h(font_size * 1.6)
                 .padding(2.0)
                 .color(rune_color(editor.color))
@@ -1214,6 +1392,11 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
         .on_drawn_layout(|state: &mut S, [_x, _y, w, h]| {
             if let Some(editor) = state.editor_mut() {
                 editor.canvas_pt = [w, h];
+            }
+        })
+        .on_double_press(|state: &mut S| {
+            if let Some(editor) = state.editor_mut() {
+                editor.on_canvas_double_press();
             }
         })
         .on_drag(|state: &mut S, drag, _tx| {
@@ -1312,6 +1495,14 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
         toolbar = toolbar.child(width_button::<S>(
             index,
             editor.width_pt == *width_pt,
+            &theme,
+            accent,
+        ));
+    }
+    for (index, size_pt) in TEXT_SIZES_PT.iter().enumerate() {
+        toolbar = toolbar.child(text_size_button::<S>(
+            index,
+            editor.text_size_pt == *size_pt,
             &theme,
             accent,
         ));
