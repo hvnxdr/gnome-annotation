@@ -87,6 +87,7 @@ impl CaptureHost for RuneHost {
     }
 
     fn focus_editor(&self) {
+        eprintln!("gnome-annotation: focusing the open editor");
         self.handle.open();
     }
 }

@@ -31,7 +31,9 @@ Release binary from `cargo build --release --offline` with the pinned Rune revis
 - Ctrl+S on a 4K fixture suggested `fixture-4k-annotated.png` and wrote one 3840x2160 PNG
   in sRGB. It is pixel-identical to the fixture, as expected with no annotations.
 - A second trigger during an open editor was accepted without a second portal call. The
-  editor stayed open with its annotations.
+  editor stayed open with its annotations, and the daemon logged
+  `gnome-annotation: focusing the open editor`. That is a focus request; whether the
+  compositor raises the window is up to Wayland and is not claimed here.
 - Cancelling GNOME's UI closed the portal request with no editor window, no log line, and
   no screenshot file.
 - Idle memory: a windowless daemon is 21.3 to 22.5 MB. After an editor closes, RSS settles
@@ -44,6 +46,8 @@ Release binary from `cargo build --release --offline` with the pinned Rune revis
 
 - Multi-monitor selection. The machine has one display.
 - A physical 2x display. The 2x checks are automated, and the live run used 1.25 scale.
+- Compositor focus on the second trigger. The daemon logs the focus request, but Wayland may
+  refuse to raise the toplevel.
 - The real Print keybinding and login autostart. The installer was exercised with the real
   `gsettings` binary and a temporary keyfile store, so the live dconf store was not
   modified.
