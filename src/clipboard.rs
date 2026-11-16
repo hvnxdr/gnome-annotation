@@ -15,7 +15,7 @@ impl std::fmt::Display for ClipboardError {
 
 impl std::error::Error for ClipboardError {}
 
-/// Where an exported PNG goes. HVN-35 extends this seam with a save sink.
+/// Where an exported PNG goes. HVN-36 adds a sink that saves the same bytes to disk.
 pub trait ClipboardSink: Send + Sync {
     fn write_png(&self, png: &[u8], tx: &mut Tx) -> Result<(), ClipboardError>;
 }

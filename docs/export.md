@@ -15,8 +15,8 @@ Enter and the Copy button both call `Editor::copy_and_close`. They take the same
 
 The annotation overlay is the same pixmap the preview draws as a Rune image. Text is shaped
 once into that pixmap. Selection outlines and handles are separate view elements, so they
-never enter the export. The preview and the export use source-image pixels for both, so the
-fitted canvas only scales the finished images for display.
+never enter the export. Both the preview and the export keep annotation geometry in
+source-image pixels. The fitted canvas only scales the finished images for display.
 
 ## What the tests check
 
