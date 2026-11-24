@@ -1,5 +1,5 @@
-//! The spike's measured numbers. The assertions are loose bounds so a slow runner reports a
-//! failure instead of silently giving up; the printed values go into `docs/spike.md`.
+//! Performance diagnostics. The assertions are loose bounds so a slow runner reports a
+//! failure instead of silently giving up.
 
 mod support;
 
