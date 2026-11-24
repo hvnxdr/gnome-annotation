@@ -21,6 +21,7 @@ use crate::document::{
     point_in_rect,
 };
 use crate::export::{self, ExportError};
+use crate::layout::{LayoutMode, MAX_WINDOW, layout_mode};
 use crate::render::{render_annotations, render_annotations_excluding};
 use crate::save::{SaveTarget, save_and_close};
 use crate::source::{LoadError, SourceImage};
@@ -28,8 +29,6 @@ use crate::text::TextRenderer;
 
 pub const APP_ID: &str = "dev.hvnxdr.GnomeAnnotation";
 pub const APP_TITLE: &str = "gnome-annotation";
-pub const DEFAULT_WINDOW: (f32, f32) = (1200.0, 800.0);
-pub const MIN_WINDOW: (f32, f32) = (640.0, 480.0);
 
 /// Selection handles are square, in screen points.
 const HANDLE_SIZE_PT: f32 = 8.0;
@@ -71,6 +70,75 @@ pub enum Tool {
     Ellipse,
     Redaction,
     Text,
+}
+
+#[derive(Clone, Copy)]
+struct ToolSpec {
+    tool: Tool,
+    label: &'static str,
+    key: &'static str,
+    shortcut: &'static str,
+}
+
+const TOOL_SPECS: [ToolSpec; 7] = [
+    ToolSpec {
+        tool: Tool::Select,
+        label: "Select",
+        key: "tool-select",
+        shortcut: "V",
+    },
+    ToolSpec {
+        tool: Tool::Line,
+        label: "Line",
+        key: "tool-line",
+        shortcut: "L",
+    },
+    ToolSpec {
+        tool: Tool::Arrow,
+        label: "Arrow",
+        key: "tool-arrow",
+        shortcut: "A",
+    },
+    ToolSpec {
+        tool: Tool::Rectangle,
+        label: "Rect",
+        key: "tool-rect",
+        shortcut: "R",
+    },
+    ToolSpec {
+        tool: Tool::Ellipse,
+        label: "Ellipse",
+        key: "tool-ellipse",
+        shortcut: "O",
+    },
+    ToolSpec {
+        tool: Tool::Redaction,
+        label: "Redact",
+        key: "tool-redaction",
+        shortcut: "X",
+    },
+    ToolSpec {
+        tool: Tool::Text,
+        label: "Text",
+        key: "tool-text",
+        shortcut: "T",
+    },
+];
+
+impl Tool {
+    fn spec(self) -> &'static ToolSpec {
+        TOOL_SPECS
+            .iter()
+            .find(|spec| spec.tool == self)
+            .expect("every tool has a descriptor")
+    }
+
+    fn from_shortcut(value: &str) -> Option<Self> {
+        TOOL_SPECS
+            .iter()
+            .find(|spec| spec.shortcut.eq_ignore_ascii_case(value))
+            .map(|spec| spec.tool)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -184,6 +252,7 @@ pub struct Editor {
     width_pt: f32,
     text_size_pt: f32,
     text_renderer: TextRenderer,
+    viewport_pt: [f32; 2],
     canvas_pt: [f32; 2],
     error: Option<String>,
     timings: Timings,
@@ -225,6 +294,7 @@ impl Editor {
             width_pt: options.width_pt,
             text_size_pt: options.text_size_pt,
             text_renderer: TextRenderer::new(),
+            viewport_pt: [MAX_WINDOW.0, MAX_WINDOW.1],
             canvas_pt: [0.0, 0.0],
             error: None,
             timings,
@@ -252,6 +322,10 @@ impl Editor {
 
     pub fn image_size(&self) -> [u32; 2] {
         [self.source.width, self.source.height]
+    }
+
+    pub fn aspect_ratio(&self) -> f32 {
+        self.source.width as f32 / self.source.height as f32
     }
 
     pub fn tool(&self) -> Tool {
@@ -375,6 +449,41 @@ impl Editor {
         }
     }
 
+    fn layout_mode(&self) -> LayoutMode {
+        layout_mode(self.viewport_pt[0])
+    }
+
+    fn tool_key(&self) -> &'static str {
+        self.tool.spec().key
+    }
+
+    fn update_viewport(&mut self, width: f32, height: f32) {
+        if self.viewport_pt != [width, height] {
+            self.viewport_pt = [width, height];
+        }
+    }
+
+    fn update_canvas_size(&mut self, width: f32, height: f32) {
+        if width <= 0.0 || height <= 0.0 || self.canvas_pt == [width, height] {
+            return;
+        }
+        let previous_scale = self.fit_scale();
+        self.canvas_pt = [width, height];
+        if (previous_scale - self.fit_scale()).abs() > f32::EPSILON {
+            self.cancel_active_drag();
+        }
+    }
+
+    fn cancel_active_drag(&mut self) {
+        let had_gesture = self.gesture.take().is_some();
+        self.draft = None;
+        self.hover = Hover::None;
+        if had_gesture {
+            self.rebuild_overlay();
+            self.refresh_chrome();
+        }
+    }
+
     pub fn color(&self) -> Rgba {
         self.color
     }
@@ -430,9 +539,13 @@ impl Editor {
         self.error.as_deref()
     }
 
-    /// Record an inline error from a boundary the editor cannot own (the save dialog).
+    /// Record a status-banner error from a boundary the editor cannot own (the save dialog).
     pub(crate) fn set_error(&mut self, error: impl Into<String>) {
         self.error = Some(error.into());
+    }
+
+    pub(crate) fn clear_error(&mut self) {
+        self.error = None;
     }
 
     /// The capture GNOME wrote. Save must never write over this file.
@@ -936,6 +1049,13 @@ impl Editor {
     }
 
     fn on_canvas_drag(&mut self, drag: &Drag) {
+        if drag.phase != Phase::Down
+            && (self.draft.is_some() || self.gesture.is_some())
+            && (drag.w - self.canvas_pt[0]).abs() > 0.5
+        {
+            self.cancel_active_drag();
+            return;
+        }
         let point = self.drag_point(drag);
         self.last_point = point;
         match self.tool {
@@ -1033,16 +1153,11 @@ pub fn editor_on_key<S: HostsEditor + 'static>(
     }
     match &event.key {
         Key::Text(value) if value.chars().count() == 1 => {
-            match value.to_ascii_lowercase().as_str() {
-                "v" => editor.set_tool(Tool::Select),
-                "l" => editor.set_tool(Tool::Line),
-                "a" => editor.set_tool(Tool::Arrow),
-                "r" => editor.set_tool(Tool::Rectangle),
-                "o" => editor.set_tool(Tool::Ellipse),
-                "x" => editor.set_tool(Tool::Redaction),
-                "t" => editor.set_tool(Tool::Text),
-                _ => return false,
-            }
+            let Some(tool) = Tool::from_shortcut(value) else {
+                return false;
+            };
+            editor.set_tool(tool);
+            tx.scroll_into_view_in("tool-strip", editor.tool_key());
             true
         }
         Key::Delete | Key::Backspace => editor.delete_selected(),
@@ -1257,9 +1372,10 @@ fn tool_button<S: HostsEditor + 'static>(
         .hover(if active { accent } else { theme.hover })
         .press(if active { accent } else { theme.press })
         .center_y()
-        .on_press(move |state: &mut S| {
+        .on_press_tx(move |state: &mut S, tx| {
             if let Some(editor) = state.editor_mut() {
                 on_press(editor);
+                tx.scroll_into_view_in("tool-strip", key);
             }
         })
         .child(text(label).font(type_::LABEL).color(ink))
@@ -1329,6 +1445,244 @@ fn choice_button<S: HostsEditor + 'static>(
             }
         })
         .child(text(format!("{value}")).font(type_::LABEL).color(ink))
+}
+
+fn tool_buttons<S: HostsEditor + 'static>(
+    editor: &Editor,
+    theme: &tok::Theme,
+    accent: Color,
+) -> El {
+    let mut tools = row().key("tools").gap(space::S2).center_y();
+    for spec in TOOL_SPECS {
+        let tool = spec.tool;
+        tools = tools.child(tool_button::<S>(
+            spec.label,
+            spec.key,
+            spec.shortcut,
+            editor.tool == tool,
+            theme,
+            accent,
+            move |editor| editor.set_tool(tool),
+        ));
+    }
+    tools
+}
+
+fn style_controls<S: HostsEditor + 'static>(
+    editor: &Editor,
+    theme: &tok::Theme,
+    accent: Color,
+    wrap: bool,
+) -> El {
+    let mut controls = row().key("styles").gap(space::S2).center_y();
+    if wrap {
+        controls = controls.flex_wrap().w_full();
+    }
+    for (index, color) in PALETTE.iter().enumerate() {
+        controls = controls.child(color_swatch::<S>(index, editor.color == *color, theme));
+    }
+    for (index, width_pt) in STROKE_WIDTHS_PT.iter().enumerate() {
+        let width_pt = *width_pt;
+        controls = controls.child(choice_button::<S>(
+            format!("width-{index}"),
+            format!("Stroke width {width_pt} points"),
+            width_pt as u32,
+            editor.width_pt == width_pt,
+            theme,
+            accent,
+            move |editor| editor.set_width_pt(width_pt),
+        ));
+    }
+    for (index, size_pt) in TEXT_SIZES_PT.iter().enumerate() {
+        let size_pt = *size_pt;
+        controls = controls.child(choice_button::<S>(
+            format!("text-size-{index}"),
+            format!("Text size {size_pt} points"),
+            size_pt as u32,
+            editor.text_size_pt == size_pt,
+            theme,
+            accent,
+            move |editor| editor.set_text_size_pt(size_pt),
+        ));
+    }
+    controls
+}
+
+fn action_button<S: HostsEditor + 'static>(
+    key: &'static str,
+    label: &'static str,
+    caption: &'static str,
+    fill: Color,
+    hover: Color,
+    press: Color,
+    ink: Color,
+    on_press: impl Fn(&mut S, &mut Tx) + 'static,
+) -> El {
+    el().key(key)
+        .role("button")
+        .label(label)
+        .focusable(true)
+        .cursor(rune::Cursor::Pointer)
+        .h(32.0)
+        .px(space::S3)
+        .radius(tok::radius::SM)
+        .fill(fill)
+        .hover(hover)
+        .press(press)
+        .center_y()
+        .on_press_tx(on_press)
+        .child(text(caption).font(type_::LABEL).color(ink))
+}
+
+fn action_buttons<S: HostsEditor + 'static>(theme: &tok::Theme, accent: Color) -> El {
+    row()
+        .key("actions")
+        .gap(space::S2)
+        .center_y()
+        .child(action_button::<S>(
+            "save",
+            "Save (Ctrl+S)",
+            "Save",
+            theme.control_track,
+            theme.hover,
+            theme.press,
+            theme.text,
+            |state, tx| {
+                if let Some(editor) = state.editor_mut() {
+                    editor.commit_text();
+                }
+                save_and_close(state, tx);
+            },
+        ))
+        .child(action_button::<S>(
+            "copy",
+            "Copy (Enter)",
+            "Copy",
+            accent,
+            accent,
+            accent,
+            Color::WHITE,
+            |state, tx| {
+                let Some(editor) = state.editor_mut() else {
+                    return;
+                };
+                editor.commit_text();
+                editor.copy_and_close(tx);
+            },
+        ))
+}
+
+fn error_banner<S: HostsEditor + 'static>(
+    editor: &Editor,
+    theme: &tok::Theme,
+    error_color: Color,
+) -> Option<El> {
+    let error = editor.error.as_ref()?;
+    Some(
+        row()
+            .key("error-banner")
+            .w_full()
+            .px(space::S6)
+            .py(space::S2)
+            .gap(space::S2)
+            .center_y()
+            .fill(theme.card)
+            .border(1.0, error_color)
+            .child(
+                text(error)
+                    .key("error")
+                    .font(type_::LABEL)
+                    .color(error_color)
+                    .wrap()
+                    .grow(1.0)
+                    .shrink(),
+            )
+            .child(
+                el().key("error-dismiss")
+                    .role("button")
+                    .label("Dismiss error")
+                    .focusable(true)
+                    .cursor(rune::Cursor::Pointer)
+                    .h(28.0)
+                    .px(space::S2)
+                    .radius(tok::radius::SM)
+                    .fill(theme.control_track)
+                    .hover(theme.hover)
+                    .press(theme.press)
+                    .center_y()
+                    .on_press(|state: &mut S| {
+                        if let Some(editor) = state.editor_mut() {
+                            editor.clear_error();
+                        }
+                    })
+                    .child(text("Dismiss").font(type_::LABEL).color(theme.text)),
+            ),
+    )
+}
+
+fn toolbar_view<S: HostsEditor + 'static>(
+    editor: &Editor,
+    mode: LayoutMode,
+    theme: &tok::Theme,
+    accent: Color,
+) -> El {
+    let tools = tool_buttons::<S>(editor, theme, accent);
+    let styles = style_controls::<S>(editor, theme, accent, mode == LayoutMode::Narrow);
+    let actions = action_buttons::<S>(theme, accent);
+    let toolbar = col()
+        .key("toolbar")
+        .w_full()
+        .px(space::S3)
+        .py(space::S2)
+        .gap(space::S2)
+        .fill(theme.card)
+        .border(1.0, theme.card_border);
+
+    match mode {
+        LayoutMode::Expanded => toolbar.child(
+            row()
+                .key("toolbar-main")
+                .w_full()
+                .h(38.0)
+                .center_y()
+                .child(tools)
+                .child(styles)
+                .child(rune::spacer())
+                .child(
+                    text("Enter copies · Esc discards")
+                        .key("shortcut-hint")
+                        .font(type_::LABEL)
+                        .color(theme.text_secondary),
+                )
+                .child(rune::spacer())
+                .child(actions),
+        ),
+        LayoutMode::Compact | LayoutMode::Narrow => {
+            let main = row().key("toolbar-main").w_full().h(38.0).center_y();
+            let main = if mode == LayoutMode::Narrow {
+                main.child(
+                    row()
+                        .key("tool-strip")
+                        .grow(1.0)
+                        .min_w(0.0)
+                        .h(38.0)
+                        .scroll_x()
+                        .center_y()
+                        .child(tools),
+                )
+            } else {
+                main.child(tools).child(rune::spacer())
+            };
+            let styles_row = if mode == LayoutMode::Narrow {
+                row().key("toolbar-styles").w_full().min_h(38.0).center_y()
+            } else {
+                row().key("toolbar-styles").w_full().h(38.0).center_y()
+            };
+            toolbar
+                .child(main.child(actions))
+                .child(styles_row.child(styles))
+        }
+    }
 }
 
 pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
@@ -1450,15 +1804,16 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
             .clamp(9.0, 96.0);
         let x_pt = px_to_pt(editing.position[0], scale);
         let y_pt = px_to_pt(editing.position[1], scale);
-        // Give the field the rest of the canvas (capped) so a normal label is typed on one
-        // line. The committed text never wraps; this only keeps the live field from doing so.
-        let field_width = (editor.canvas_pt[0] - x_pt - 8.0).clamp(200.0, 960.0);
+        // Give the field the rest of the canvas. Single-line input scrolls under the caret,
+        // so a label near the right edge never needs to wrap or extend past the capture.
+        let field_width = (editor.canvas_pt[0] - x_pt - 8.0).clamp(1.0, 960.0);
         let style = TextStyle::new(font_size, 400.0).family(Family::Named(ANNOTATION_FAMILY));
         canvas_el = canvas_el.child(
             text_input(&editing.edit, style)
                 .key("text-editor")
                 .absolute(x_pt, y_pt)
                 .w(field_width)
+                .single_line()
                 .min_h(font_size * 1.6)
                 .padding(2.0)
                 .color(rune_color(editor.color))
@@ -1482,6 +1837,11 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                     };
                     if event.key == Key::Escape {
                         editor.cancel_text();
+                        true
+                    } else if event.key == Key::Enter && event.mods.shift {
+                        if let Some(editing) = &mut editor.editing {
+                            editing.edit.insert("\n");
+                        }
                         true
                     } else {
                         false
@@ -1519,9 +1879,9 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
                 editor.on_canvas_pointer_move([event.x, event.y]);
             }
         })
-        .on_drawn_layout(|state: &mut S, [_x, _y, w, h]| {
+        .on_layout(|state: &mut S, [_x, _y, w, h]| {
             if let Some(editor) = state.editor_mut() {
-                editor.canvas_pt = [w, h];
+                editor.update_canvas_size(w, h);
             }
         })
         .on_double_press(|state: &mut S| {
@@ -1544,171 +1904,29 @@ pub fn editor_view<S: HostsEditor + 'static>(state: &S, cx: &mut Cx<S>) -> El {
         .justify_center()
         .padding(space::S6)
         .fill(theme.bg)
+        .on_layout_tx(|state: &mut S, [_x, _y, width, height], tx| {
+            let Some(editor) = state.editor_mut() else {
+                return;
+            };
+            let previous_mode = editor.layout_mode();
+            editor.update_viewport(width, height);
+            if previous_mode != LayoutMode::Narrow && editor.layout_mode() == LayoutMode::Narrow {
+                let key = editor.tool_key();
+                tx.scroll_into_view_in("tool-strip", key);
+            }
+        })
         .child(canvas_el);
 
-    let mut toolbar = row()
-        .key("toolbar")
-        .w_full()
-        .h(56.0)
-        .px(space::S3)
-        .gap(space::S2)
-        .center_y()
-        .fill(theme.card)
-        .border(1.0, theme.card_border)
-        .child(tool_button::<S>(
-            "Select",
-            "tool-select",
-            "V",
-            editor.tool == Tool::Select,
-            &theme,
-            accent,
-            |e| e.set_tool(Tool::Select),
-        ))
-        .child(tool_button::<S>(
-            "Line",
-            "tool-line",
-            "L",
-            editor.tool == Tool::Line,
-            &theme,
-            accent,
-            |e| e.set_tool(Tool::Line),
-        ))
-        .child(tool_button::<S>(
-            "Arrow",
-            "tool-arrow",
-            "A",
-            editor.tool == Tool::Arrow,
-            &theme,
-            accent,
-            |e| e.set_tool(Tool::Arrow),
-        ))
-        .child(tool_button::<S>(
-            "Rect",
-            "tool-rect",
-            "R",
-            editor.tool == Tool::Rectangle,
-            &theme,
-            accent,
-            |e| e.set_tool(Tool::Rectangle),
-        ))
-        .child(tool_button::<S>(
-            "Ellipse",
-            "tool-ellipse",
-            "O",
-            editor.tool == Tool::Ellipse,
-            &theme,
-            accent,
-            |e| e.set_tool(Tool::Ellipse),
-        ))
-        .child(tool_button::<S>(
-            "Redact",
-            "tool-redaction",
-            "X",
-            editor.tool == Tool::Redaction,
-            &theme,
-            accent,
-            |e| e.set_tool(Tool::Redaction),
-        ))
-        .child(tool_button::<S>(
-            "Text",
-            "tool-text",
-            "T",
-            editor.tool == Tool::Text,
-            &theme,
-            accent,
-            |e| e.set_tool(Tool::Text),
-        ));
-    for (index, color) in PALETTE.iter().enumerate() {
-        toolbar = toolbar.child(color_swatch::<S>(index, editor.color == *color, &theme));
-    }
-    for (index, width_pt) in STROKE_WIDTHS_PT.iter().enumerate() {
-        let width_pt = *width_pt;
-        toolbar = toolbar.child(choice_button::<S>(
-            format!("width-{index}"),
-            format!("Stroke width {width_pt} points"),
-            width_pt as u32,
-            editor.width_pt == width_pt,
-            &theme,
-            accent,
-            move |editor| editor.set_width_pt(width_pt),
-        ));
-    }
-    for (index, size_pt) in TEXT_SIZES_PT.iter().enumerate() {
-        let size_pt = *size_pt;
-        toolbar = toolbar.child(choice_button::<S>(
-            format!("text-size-{index}"),
-            format!("Text size {size_pt} points"),
-            size_pt as u32,
-            editor.text_size_pt == size_pt,
-            &theme,
-            accent,
-            move |editor| editor.set_text_size_pt(size_pt),
-        ));
-    }
-    toolbar = toolbar
-        .child(rune::spacer())
-        .child(
-            text("Enter copies · Esc discards")
-                .font(type_::LABEL)
-                .color(theme.text_secondary),
-        )
-        .child(rune::spacer());
-    if let Some(error) = &editor.error {
-        toolbar = toolbar.child(
-            text(error)
-                .key("error")
-                .font(type_::LABEL)
-                .color(tok::accent(2, dark)),
-        );
-    }
-    toolbar = toolbar.child(
-        el().key("save")
-            .role("button")
-            .label("Save (Ctrl+S)")
-            .focusable(true)
-            .cursor(rune::Cursor::Pointer)
-            .h(32.0)
-            .px(space::S3)
-            .radius(tok::radius::SM)
-            .fill(theme.control_track)
-            .hover(theme.hover)
-            .press(theme.press)
-            .center_y()
-            .on_press_tx(|state: &mut S, tx: &mut Tx| {
-                if let Some(editor) = state.editor_mut() {
-                    editor.commit_text();
-                }
-                save_and_close(state, tx);
-            })
-            .child(text("Save").font(type_::LABEL).color(theme.text)),
-    );
-    toolbar = toolbar.child(
-        el().key("copy")
-            .role("button")
-            .label("Copy (Enter)")
-            .focusable(true)
-            .cursor(rune::Cursor::Pointer)
-            .h(32.0)
-            .px(space::S3)
-            .radius(tok::radius::SM)
-            .fill(accent)
-            .hover(accent)
-            .press(accent)
-            .center_y()
-            .on_press_tx(|state: &mut S, tx: &mut Tx| {
-                let Some(editor) = state.editor_mut() else {
-                    return;
-                };
-                editor.commit_text();
-                editor.copy_and_close(tx);
-            })
-            .child(text("Copy").font(type_::LABEL).color(Color::WHITE)),
-    );
-
-    col()
+    let toolbar = toolbar_view::<S>(editor, editor.layout_mode(), &theme, accent);
+    let error_color = tok::accent(2, dark);
+    let mut root = col()
+        .key("root")
         .w_full()
         .h_full()
         .fill(theme.bg)
-        .child(stage)
-        .child(toolbar)
+        .child(stage);
+    if let Some(banner) = error_banner::<S>(editor, &theme, error_color) {
+        root = root.child(banner);
+    }
+    root.child(toolbar)
 }

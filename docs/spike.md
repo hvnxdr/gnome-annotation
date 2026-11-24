@@ -156,6 +156,6 @@ app.
 - The system clipboard path is only proven through Rune's in-memory clipboard. Pasting a 4K
   PNG into another app still needs a manual check.
 - The copy path caps at Rune's 32 MiB PNG and 64 megapixel limits. A large, noisy 4K capture
-  should stay well below both. If it does not, the editor stays open with an inline error.
+  should stay well below both. If it does not, the editor stays open with a status banner.
 - The live first frame will include Wayland window creation and GPU shader setup. The 318.5 ms
   real-window run is a reasonable estimate but was not measured after a portal dialog.

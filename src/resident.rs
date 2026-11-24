@@ -6,17 +6,19 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use rune::{AppHandle, AppSpec, Tx, Waker};
+use rune::{AppHandle, AppSpec, RunOptions, Tx, Waker, WindowSpec};
 
 use crate::assets::{FONTS, UI_FAMILY};
 use crate::capture::PortalScreenshot;
 use crate::clipboard::{ClipboardSink, RuneClipboard};
 use crate::daemon::{CaptureHost, Daemon};
 use crate::editor::{
-    APP_ID, APP_TITLE, DEFAULT_WINDOW, Editor, EditorOptions, HostsEditor, MIN_WINDOW,
-    editor_on_key, editor_view,
+    APP_ID, APP_TITLE, Editor, EditorOptions, HostsEditor, editor_on_key, editor_view,
 };
 use crate::ipc::{IpcError, SocketServer, TriggerClient, socket_path};
+use crate::layout::{
+    MAX_WINDOW, MIN_WINDOW, initial_window_size, minimum_window_size, primary_layout_bounds,
+};
 use crate::notify::DbusNotifier;
 
 /// The daemon's app state. The editor exists only while its window is open, so closing the
@@ -46,6 +48,8 @@ struct RuneHost {
     /// Set when the portal returns and the editor is about to open. `on_ready` reads it after
     /// the first frame so the log reports the full portal-to-first-frame path.
     first_frame_at: Arc<Mutex<Option<Instant>>>,
+    /// App-side layout bounds captured when Rune discovers displays. `None` on Wayland.
+    display_pt: Arc<Mutex<Option<[f32; 2]>>>,
 }
 
 impl RuneHost {
@@ -73,10 +77,12 @@ impl CaptureHost for RuneHost {
             "gnome-annotation: decoded and prepared the capture in {:.1} ms",
             editor.timings().decode_ms
         );
+        let size = initial_window_size(editor.aspect_ratio(), *self.display_pt.lock().unwrap());
         let handle = self.handle.clone();
-        handle.update(move |state, _tx| {
+        handle.update(move |state, tx| {
             editor.setup(waker);
             state.editor = Some(editor);
+            tx.resize_window_instant(size);
         });
         handle.open();
         eprintln!(
@@ -110,7 +116,8 @@ fn daemon_on_key(state: &mut DaemonState, event: &rune::KeyEvent, tx: &mut Tx) -
 pub fn run_daemon() -> Result<(), String> {
     rune::set_app_id(APP_ID);
     let waker: Arc<Mutex<Option<Waker>>> = Arc::default();
-    let mut spec = AppSpec::new(APP_TITLE, DEFAULT_WINDOW, || unreachable!(), editor_view);
+    let display_pt: Arc<Mutex<Option<[f32; 2]>>> = Arc::default();
+    let mut spec = AppSpec::new(APP_TITLE, MAX_WINDOW, || unreachable!(), editor_view);
     spec.min_size = Some(MIN_WINDOW);
     spec.fonts = FONTS;
     spec.families = (UI_FAMILY, UI_FAMILY);
@@ -140,6 +147,7 @@ pub fn run_daemon() -> Result<(), String> {
         clipboard: Arc::new(RuneClipboard),
         waker: waker.clone(),
         first_frame_at,
+        display_pt: display_pt.clone(),
     });
     let daemon = Arc::new(Daemon::new(
         Arc::new(PortalScreenshot),
@@ -163,10 +171,22 @@ pub fn run_daemon() -> Result<(), String> {
         waker,
         daemon,
     };
-    let result = app
-        .init(move || state)
-        .try_run()
-        .map_err(|error| format!("cannot start the daemon: {error}"));
+    let display_for_factory = display_pt;
+    let result = rune::try_run_windows_with_args(RunOptions::default(), [], move |displays| {
+        let display = primary_layout_bounds(displays);
+        *display_for_factory.lock().unwrap() = display;
+        let min_size = minimum_window_size(display);
+        let options = rune::WindowOptions {
+            min_size: Some(min_size),
+            ..Default::default()
+        };
+        vec![
+            WindowSpec::from_app("editor", app)
+                .options(options)
+                .state(state),
+        ]
+    })
+    .map_err(|error| format!("cannot start the daemon: {error}"));
     drop(server);
     result
 }

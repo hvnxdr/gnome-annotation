@@ -54,7 +54,7 @@ Release binary from `cargo build --release --offline` with the pinned Rune revis
 - Portal failure and notification on the live desktop. The adapter mapping and the
   notification call are covered by tests and by the daemon smoke check.
 - Clipboard and save failure on the live desktop. The headless tests fail the sinks and
-  assert the inline error and the open editor.
+  assert the status banner and the open editor.
 
 ## Gaps fixed during acceptance
 

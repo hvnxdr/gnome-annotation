@@ -108,6 +108,13 @@ In the editor:
 The toolbar has the same tools, six colours, three stroke widths, three text sizes, Save,
 and Copy. New annotations use the selected colour, width, and text size. Redaction is
 always opaque black. The whole capture is fitted to the window. There is no zoom or pan.
+The toolbar uses one row in wide windows and two rows in narrow windows. Save and Copy
+stay visible. The narrow tool row scrolls sideways and reveals the active tool. Copy and
+save failures appear in a dismissible status banner.
+
+The editor requests a window up to 1200x800 points. Its first size follows the capture's
+aspect ratio and the display bounds. The normal minimum is 480x360 points. A smaller
+display can force a smaller minimum.
 
 With the select tool, click an annotation to select it, drag it to move it, and drag a
 handle to resize it. Press `Delete` to remove it. Double-click committed text to edit it
@@ -142,6 +149,7 @@ run.
 | `src/capture.rs` | Screenshot portal trait and zbus adapter |
 | `src/daemon.rs` | Resident capture state machine |
 | `src/ipc.rs` | Unix socket server, lock file, trigger client |
+| `src/layout.rs` | Responsive breakpoints and initial window sizing |
 | `src/notify.rs` | Desktop notification trait and zbus adapter |
 | `src/resident.rs` | Windowless Rune daemon that opens the editor |
 | `src/document.rs` | Annotation document, ids, draw order, palette, shared shape geometry |
