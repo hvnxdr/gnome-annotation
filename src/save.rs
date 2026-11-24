@@ -49,7 +49,7 @@ impl Default for SaveTarget {
 /// The one file output: export the same bytes Enter copies, then ask where they go.
 ///
 /// The dialog answer runs on a later frame. A chosen path is written once; cancelling does
-/// nothing; an export or write failure leaves the editor open with an inline error.
+/// nothing; an export or write failure leaves the editor open with a status banner.
 pub fn save_and_close<S: HostsEditor + 'static>(state: &mut S, tx: &mut Tx) {
     let Some(editor) = state.editor_mut() else {
         return;

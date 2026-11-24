@@ -9,6 +9,7 @@ pub mod document;
 pub mod editor;
 pub mod export;
 pub mod ipc;
+pub mod layout;
 pub mod notify;
 pub mod render;
 pub mod resident;

@@ -334,7 +334,7 @@ fn a_failed_copy_keeps_the_editor_open_and_renders_the_error() {
 
     rt.key(enter());
     rt.frame(0.0);
-    // Let the inline error fade in.
+    // Let the status banner appear.
     for _ in 0..60 {
         rt.frame(1.0 / 120.0);
     }
@@ -351,7 +351,7 @@ fn a_failed_copy_keeps_the_editor_open_and_renders_the_error() {
         .elements()
         .into_iter()
         .find(|element| element.key.as_deref() == Some("error"))
-        .expect("the toolbar shows an inline error");
+        .expect("the status banner shows the error");
     assert_eq!(error.text.as_deref(), Some(message));
     let (rect, opacity) = rt.presented("error").expect("the error is laid out");
     assert!(

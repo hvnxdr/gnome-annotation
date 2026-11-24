@@ -234,7 +234,7 @@ fn cancelling_the_memory_chooser_leaves_the_editor_open_without_an_error() {
 }
 
 #[test]
-fn a_save_failure_keeps_the_editor_open_and_renders_the_inline_error() {
+fn a_save_failure_keeps_the_editor_open_and_renders_the_status_banner() {
     let dir = TempDir::new("save-failure");
     let fixture = write_capture(dir.path());
     let mut harness = saved_editor(&fixture);
@@ -242,7 +242,7 @@ fn a_save_failure_keeps_the_editor_open_and_renders_the_inline_error() {
 
     harness.rt.key(ctrl_s());
     harness.rt.frame(0.0);
-    // Let the inline error fade in.
+    // Let the status banner appear.
     for _ in 0..60 {
         harness.rt.frame(1.0 / 120.0);
     }
@@ -258,7 +258,7 @@ fn a_save_failure_keeps_the_editor_open_and_renders_the_inline_error() {
         .elements()
         .into_iter()
         .find(|element| element.key.as_deref() == Some("error"))
-        .expect("the toolbar shows an inline error");
+        .expect("the status banner shows the error");
     assert_eq!(error.text.as_deref(), Some("disk full"));
     let (rect, opacity) = harness
         .rt
@@ -340,7 +340,7 @@ fn cancelling_the_portal_dialog_leaves_the_editor_open_and_writes_nothing() {
 }
 
 #[test]
-fn an_unwritable_path_shows_the_inline_error_and_keeps_the_editor_open() {
+fn an_unwritable_path_shows_the_status_banner_and_keeps_the_editor_open() {
     let dir = TempDir::new("save-dialog-unwritable");
     let fixture = write_capture(dir.path());
     let mut rt = dialog_editor(&fixture);
@@ -359,7 +359,10 @@ fn an_unwritable_path_shows_the_inline_error_and_keeps_the_editor_open() {
         rt.shell_request, None,
         "a failed write does not ask the shell to close"
     );
-    let error = rt.state.error().expect("the failure is reported inline");
+    let error = rt
+        .state
+        .error()
+        .expect("the failure is reported in the status banner");
     assert!(
         error.contains("cannot save"),
         "the error names the failed save: {error}"
@@ -369,7 +372,7 @@ fn an_unwritable_path_shows_the_inline_error_and_keeps_the_editor_open() {
         .elements()
         .into_iter()
         .find(|element| element.key.as_deref() == Some("error"))
-        .expect("the toolbar shows an inline error");
+        .expect("the status banner shows the error");
     assert_eq!(shown.text.as_deref(), Some(error));
 }
 
