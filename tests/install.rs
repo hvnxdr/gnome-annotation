@@ -1,5 +1,5 @@
-//! The install script, exercised with a temporary HOME and XDG tree plus a fake gsettings that
-//! records every call and keeps the custom-keybindings array.
+//! The install script, exercised with a temporary HOME and XDG tree plus a fake gsettings first
+//! on PATH that records every call. Install and uninstall never touch GNOME keybinding settings.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -9,10 +9,6 @@ use std::process::{Command, Output};
 mod support;
 
 use support::TempDir;
-
-const OUR_PATH: &str =
-    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/gnome-annotation/";
-const CUSTOM0: &str = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/";
 
 struct Installer {
     _dir: TempDir,
@@ -25,11 +21,11 @@ struct Installer {
 }
 
 impl Installer {
-    fn new(name: &str, initial: &str) -> Self {
-        Self::with_bin_dir(name, initial, "bin")
+    fn new(name: &str) -> Self {
+        Self::with_bin_dir(name, "bin")
     }
 
-    fn with_bin_dir(name: &str, initial: &str, bin_dir: &str) -> Self {
+    fn with_bin_dir(name: &str, bin_dir: &str) -> Self {
         let dir = TempDir::new(name);
         let home = dir.path().join("home");
         let data = dir.path().join("data");
@@ -39,7 +35,6 @@ impl Installer {
         for path in [&home, &data, &config, &bin, &fake_dir] {
             fs::create_dir_all(path).expect("create fixture directory");
         }
-        fs::write(fake_dir.join("initial"), format!("{initial}\n")).unwrap();
         let fake = fake_dir.join("gsettings");
         fs::write(&fake, FAKE_GSETTINGS).unwrap();
         fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
@@ -66,7 +61,7 @@ impl Installer {
             .env("XDG_DATA_HOME", &self.data)
             .env("XDG_CONFIG_HOME", &self.config)
             .env("XDG_BIN_HOME", &self.bin)
-            .env("GSETTINGS", &self.fake)
+            .env("PATH", path_with(self.fake.parent().unwrap()))
             .env("GNOME_ANNOTATION_BIN", &self.source)
             .env("FAKE_DIR", self.fake.parent().unwrap())
             .output()
@@ -87,40 +82,22 @@ impl Installer {
             .join("autostart/dev.hvnxdr.GnomeAnnotation.desktop")
     }
 
-    fn current(&self) -> String {
-        fs::read_to_string(self.fake.parent().unwrap().join("current")).unwrap_or_default()
-    }
-
     fn log(&self) -> String {
         fs::read_to_string(self.fake.parent().unwrap().join("log")).unwrap_or_default()
     }
 }
 
-const FAKE_GSETTINGS: &str = r#"#!/usr/bin/env bash
+/// `PATH` with the fake gsettings directory first, so any `gsettings` call reaches the fake.
+fn path_with(dir: &Path) -> std::ffi::OsString {
+    let mut paths = vec![dir.to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    std::env::join_paths(paths).expect("join PATH")
+}
+
+const FAKE_GSETTINGS: &str = r#"#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_DIR/log"
-case "$1" in
-  get)
-    case "$2:$3" in
-      org.gnome.settings-daemon.plugins.media-keys:custom-keybindings)
-        if [ -f "$FAKE_DIR/current" ]; then
-          cat "$FAKE_DIR/current"
-        else
-          cat "$FAKE_DIR/initial"
-        fi
-        ;;
-      *)
-        printf '@as []\n'
-        ;;
-    esac
-    ;;
-  set)
-    case "$2:$3" in
-      org.gnome.settings-daemon.plugins.media-keys:custom-keybindings)
-        printf '%s\n' "$4" > "$FAKE_DIR/current"
-        ;;
-    esac
-    ;;
-esac
 exit 0
 "#;
 
@@ -134,8 +111,8 @@ fn assert_success(output: &Output) {
 }
 
 #[test]
-fn install_writes_the_binary_entries_and_keybinding() {
-    let fixture = Installer::new("install-basic", &format!("['{CUSTOM0}']"));
+fn install_writes_the_binary_and_entries_without_touching_keybindings() {
+    let fixture = Installer::new("install-basic");
     let output = fixture.run(&[]);
     assert_success(&output);
 
@@ -160,26 +137,17 @@ fn install_writes_the_binary_entries_and_keybinding() {
     );
     assert!(autostart.contains("X-GNOME-Autostart-enabled=true"));
 
-    assert_eq!(
-        fixture.current().trim(),
-        format!("['{CUSTOM0}', '{OUR_PATH}']"),
-        "the existing keybinding keeps its place and ours is appended"
-    );
-
-    let log = fixture.log();
-    assert!(log.contains("binding Print"), "{log}");
+    assert_eq!(fixture.log(), "", "install never runs gsettings");
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        log.contains(&format!(
-            "set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{OUR_PATH} command {} --trigger",
-            bin.display()
-        )),
-        "the Print binding runs the trigger client: {log}"
+        !stdout.contains("Print"),
+        "install does not mention Print: {stdout}"
     );
 }
 
 #[test]
-fn a_bin_directory_with_a_space_keeps_the_print_command_quoted() {
-    let fixture = Installer::with_bin_dir("install-space", &format!("['{CUSTOM0}']"), "bin dir");
+fn a_bin_directory_with_a_space_keeps_the_exec_lines_quoted() {
+    let fixture = Installer::with_bin_dir("install-space", "bin dir");
     assert_success(&fixture.run(&[]));
 
     let bin = fixture.bin_path();
@@ -193,46 +161,16 @@ fn a_bin_directory_with_a_space_keeps_the_print_command_quoted() {
         desktop.contains(&format!("Exec=\"{}\"", bin.display())),
         "the desktop entry quotes the binary path: {desktop}"
     );
-    let log = fixture.log();
+    let autostart = fs::read_to_string(fixture.autostart()).expect("autostart entry");
     assert!(
-        log.contains(&format!("command \"{}\" --trigger", bin.display())),
-        "the Print command quotes the binary path: {log}"
+        autostart.contains(&format!("Exec=\"{}\" --daemon", bin.display())),
+        "the autostart entry quotes the binary path: {autostart}"
     );
-    assert!(
-        !log.contains(&format!("command {} --trigger", bin.display())),
-        "the unquoted path never reaches the keybinding: {log}"
-    );
-}
-
-#[test]
-fn installing_twice_does_not_duplicate_the_keybinding() {
-    let fixture = Installer::new("install-twice", &format!("['{CUSTOM0}']"));
-    assert_success(&fixture.run(&[]));
-    assert_success(&fixture.run(&[]));
-
-    let current = fixture.current();
-    assert_eq!(
-        current.matches(OUR_PATH).count(),
-        1,
-        "one entry after two installs: {current}"
-    );
-    assert_eq!(
-        current.trim(),
-        format!("['{CUSTOM0}', '{OUR_PATH}']"),
-        "custom0 is still first"
-    );
-}
-
-#[test]
-fn install_works_with_an_empty_keybinding_array() {
-    let fixture = Installer::new("install-empty", "@as []");
-    assert_success(&fixture.run(&[]));
-    assert_eq!(fixture.current().trim(), format!("['{OUR_PATH}']"));
 }
 
 #[test]
 fn uninstall_removes_only_what_was_installed() {
-    let fixture = Installer::new("uninstall", &format!("['{CUSTOM0}']"));
+    let fixture = Installer::new("uninstall");
     assert_success(&fixture.run(&[]));
     let other = fixture.bin.join("other-tool");
     fs::write(&other, "keep me").unwrap();
@@ -247,34 +185,12 @@ fn uninstall_removes_only_what_was_installed() {
         "keep me",
         "an unrelated binary in the same directory stays"
     );
-    assert_eq!(
-        fixture.current().trim(),
-        format!("['{CUSTOM0}']"),
-        "the unrelated keybinding stays and ours is removed"
-    );
-    let log = fixture.log();
-    assert!(
-        log.contains(&format!(
-            "reset org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{OUR_PATH} name"
-        )),
-        "the installer resets only our keybinding keys: {log}"
-    );
+    assert_eq!(fixture.log(), "", "uninstall never runs gsettings");
 }
 
 #[test]
 fn uninstall_is_harmless_when_nothing_was_installed() {
-    let fixture = Installer::new("uninstall-fresh", &format!("['{CUSTOM0}']"));
-    let output = fixture.run(&["--uninstall"]);
-    assert_success(&output);
-    assert!(
-        fixture.current().is_empty(),
-        "no write reaches the keybinding array when ours is absent"
-    );
-    assert!(
-        !fixture
-            .log()
-            .contains("set org.gnome.settings-daemon.plugins.media-keys custom-keybindings"),
-        "the array was left untouched: {}",
-        fixture.log()
-    );
+    let fixture = Installer::new("uninstall-fresh");
+    assert_success(&fixture.run(&["--uninstall"]));
+    assert_eq!(fixture.log(), "", "uninstall never runs gsettings");
 }

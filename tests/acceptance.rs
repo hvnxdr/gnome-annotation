@@ -1,6 +1,6 @@
 //! Desktop acceptance checks that can run without a display.
 //!
-//! The live portal, clipboard paste, and Print keybinding still need a human pass. These
+//! The live portal, clipboard paste, and login autostart still need a human pass. These
 //! tests pin the parts that a headless runtime can prove: the 4K fit, screen-space handles
 //! at a high device scale, and a source-resolution copy.
 

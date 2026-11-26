@@ -10,16 +10,15 @@ gnome-annotation: annotate a screenshot, copy it, and close
 
 Usage:
   gnome-annotation                     Ask the daemon to capture (starts it if needed)
-  gnome-annotation --trigger           Same as no arguments
   gnome-annotation --daemon            Run the resident daemon (started at login)
   gnome-annotation --editor <path.png> Open the editor on an image
   gnome-annotation --capture           One-shot capture with GNOME's UI, then edit
   gnome-annotation --help              Show this help
 
-The installer binds Print to the trigger and adds the daemon to autostart. The
-resident daemon keeps running after the editor closes, so a copied image stays
-available to paste. --capture runs the portal in its own process and then exits;
-its clipboard offer ends with the process. Keep --capture for manual testing.
+The installer adds the daemon to autostart. The resident daemon keeps running
+after the editor closes, so a copied image stays available to paste.
+--capture runs the portal in its own process and then exits; its
+clipboard offer ends with the process. Keep --capture for manual testing.
 
 In the editor:
   V  select tool
@@ -65,7 +64,6 @@ pub fn parse(args: &[String]) -> Result<CliCommand, CliError> {
         [flag] if flag == "--help" || flag == "-h" => Ok(CliCommand::Help),
         [flag] if flag == "--capture" => Ok(CliCommand::Capture),
         [flag] if flag == "--daemon" => Ok(CliCommand::Daemon),
-        [flag] if flag == "--trigger" => Ok(CliCommand::Trigger),
         [flag, path] if flag == "--editor" => {
             if path.is_empty() {
                 Err(CliError("--editor needs an image path".into()))

@@ -3,7 +3,10 @@
 //! The real target is the FileChooser portal through Rune's `Tx::save_file`. Tests inject a
 //! memory sink that records the suggested name and the bytes, and can cancel or fail.
 
-use std::path::{Path, PathBuf};
+use std::fs::{File, Metadata, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
 use std::sync::Arc;
 
 use rune::{FileDialogOptions, Tx};
@@ -85,13 +88,7 @@ pub fn save_and_close<S: HostsEditor + 'static>(state: &mut S, tx: &mut Tx) {
                 };
                 match result {
                     Ok(Some(path)) => {
-                        if same_file(editor.capture_path(), &path) {
-                            let error = "cannot overwrite the original capture".to_owned();
-                            eprintln!("gnome-annotation: save failed: {error}");
-                            editor.set_error(error);
-                            return;
-                        }
-                        match write_png(&path, &png) {
+                        match write_unless_original(editor.capture_path(), &path, &png) {
                             Ok(()) => tx.close_window(),
                             Err(error) => {
                                 eprintln!("gnome-annotation: save failed: {error}");
@@ -107,27 +104,33 @@ pub fn save_and_close<S: HostsEditor + 'static>(state: &mut S, tx: &mut Tx) {
     }
 }
 
-/// Whether two paths name the same file. An existing file resolves through `canonicalize`;
-/// a path that does not exist yet resolves its parent, so a chosen name in a linked directory
-/// still compares equal to the capture.
-fn same_file(a: &Path, b: &Path) -> bool {
-    fn resolved(path: &Path) -> Option<PathBuf> {
-        if let Ok(canonical) = path.canonicalize() {
-            return Some(canonical);
-        }
-        let name = path.file_name()?;
-        let parent = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .unwrap_or(Path::new("."));
-        parent.canonicalize().ok().map(|parent| parent.join(name))
+/// Write the PNG to `path` unless it is the Original capture.
+///
+/// Identity is the `(dev, ino)` pair of open handles, so symlinks, hard links, and a path
+/// swapped after the check all resolve to the file that would really be written. The chosen
+/// file is opened without truncation and compared before any byte changes. If the capture's
+/// identity cannot be read, the save is refused.
+fn write_unless_original(capture: &Path, path: &Path, png: &[u8]) -> Result<(), String> {
+    let capture_id = File::open(capture)
+        .and_then(|file| file.metadata())
+        .map(|metadata| file_id(&metadata))
+        .map_err(|error| format!("cannot check the original capture: {error}"))?;
+    let cannot_save = |error: std::io::Error| format!("cannot save {}: {error}", path.display());
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(cannot_save)?;
+    let metadata = file.metadata().map_err(cannot_save)?;
+    if file_id(&metadata) == capture_id {
+        return Err("cannot overwrite the original capture".to_owned());
     }
-    match (resolved(a), resolved(b)) {
-        (Some(a), Some(b)) => a == b,
-        _ => false,
-    }
+    file.set_len(0).map_err(cannot_save)?;
+    file.write_all(png).map_err(cannot_save)
 }
 
-fn write_png(path: &Path, png: &[u8]) -> Result<(), String> {
-    std::fs::write(path, png).map_err(|error| format!("cannot save {}: {error}", path.display()))
+/// A file's identity on Unix: the device and inode an open handle points at.
+fn file_id(metadata: &Metadata) -> (u64, u64) {
+    (metadata.dev(), metadata.ino())
 }

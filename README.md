@@ -3,8 +3,8 @@
 Annotate a screenshot from GNOME's own screenshot UI and copy the result at source
 resolution.
 
-This is the v1 build after the framework gate. It has the resident daemon and Print
-trigger, the capture path, the editor window, line, arrow, rectangle, ellipse, redaction, and
+This is the v1 build after the framework gate. It has the resident daemon and Trigger
+client, the capture path, the editor window, line, arrow, rectangle, ellipse, redaction, and
 text annotations, six colours, three stroke widths, selection, undo and redo, Save As, PNG
 export, and a clipboard seam.
 
@@ -13,7 +13,7 @@ recorded in [`docs/adr/`](docs/adr/).
 
 ## Requirements
 
-- Rust 1.88 or newer (edition 2024).
+- Rust 1.89 or newer (edition 2024).
 - Linux with a Wayland or X11 session for the editor.
 - An XDG desktop portal with `org.freedesktop.portal.Screenshot` for Capture.
 - The vendored Adwaita Sans face for annotation text. Rune's Inter faces are vendored for
@@ -29,21 +29,22 @@ scripts/install.sh
 ```
 
 The installer builds the release binary, installs it to `${XDG_BIN_HOME:-$HOME/.local/bin}`,
-writes a desktop entry and a daemon autostart entry, and appends a Print custom keybinding.
-Existing custom keybindings keep their order. To start the daemon without logging out,
-either log in again or run the installed binary with `--daemon`.
+and writes a desktop entry and a daemon autostart entry. It does not read or change GNOME
+keybinding settings. To start the daemon without logging out, either log in again or run
+the installed binary with `--daemon`.
 
-The binding runs `<binary> --trigger`. The one-shot `--capture` mode makes its own portal
-call, so it cannot focus the daemon's open editor. The trigger goes through the daemon and
-keeps unsaved annotations on a second Print press.
+Running the binary with no arguments sends a Trigger to the daemon. A second Trigger while
+the Editor is open requests focus and keeps unsaved annotations. The one-shot `--capture`
+mode makes its own portal call, so it cannot focus the daemon's open editor.
 
 ```sh
 scripts/install.sh --uninstall
 ```
 
-Uninstall removes the binary, the desktop entry, and the autostart entry. It also
-removes the app's fixed keybinding path and resets that path's name, command, and
-binding. It does not restore a previous value at the same path.
+Uninstall removes the binary, the desktop entry, and the autostart entry. It leaves GNOME
+keybinding settings unchanged. An older install added a Print binding that runs
+`<binary> --trigger`; that flag no longer exists, so remove the binding in GNOME's keyboard
+settings.
 
 ## Build
 
@@ -135,8 +136,8 @@ The editor tests drive a real Rune runtime through the explicit-image seam: they
 3840x2160 fixture, draw shapes with the pointer, change the colour and stroke width, type
 and commit text, undo and redo edits, save through a headless file dialog, press Enter,
 and assert on the PNG a memory clipboard sink received. The daemon tests cover the state
-machine, the socket, the trigger client, and the installer with a fake `gsettings` and a
-temporary HOME.
+machine, the socket, the trigger client, and the installer with a temporary HOME and a fake
+`gsettings` that proves it is never called.
 
 To print headless performance diagnostics:
 
@@ -164,7 +165,7 @@ The test uses a headless Rune runtime. It measures CPU work without GPU presenta
 | `src/save.rs` | Save target, file chooser handoff, and the save seam |
 | `src/source.rs` | Decode the PNG into source pixels and a pixmap |
 | `src/clipboard.rs` | `ClipboardSink` and the Rune clipboard |
-| `src/cli.rs` | Modes: trigger, daemon, `--editor`, `--capture` |
+| `src/cli.rs` | Modes: no-argument Trigger, `--daemon`, `--editor`, `--capture` |
 | `scripts/install.sh` | Install and uninstall |
 
 ## Measured behavior
@@ -186,8 +187,7 @@ scale:
 - A physical 2x display. The 2x checks are automated, and the live run used 1.25 scale.
 - Compositor focus after a second Trigger. The daemon requests focus, but Wayland may refuse
   to raise the window.
-- The real Print keybinding and login autostart in the live dconf store. The installer was
-  exercised with the real `gsettings` binary against a temporary keyfile store.
+- Login autostart on the live desktop.
 - Portal failure and desktop notification on the live desktop. The adapter mapping and
   notification call are covered by tests and by the daemon smoke check.
 - Copy and Save As failure on the live desktop. Headless tests inject failures and assert

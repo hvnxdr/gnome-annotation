@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use gnome_annotation::capture::{CaptureError, CaptureOutcome, ScreenshotPortal};
-use gnome_annotation::cli::{CliCommand, parse, run_with};
+use gnome_annotation::cli::{CliCommand, CliError, parse, run_with};
 
 struct FakePortal(Result<CaptureOutcome, CaptureError>);
 
@@ -77,7 +77,11 @@ fn parsing_covers_every_mode() {
     );
     assert_eq!(parse(&["--capture".into()]).unwrap(), CliCommand::Capture);
     assert_eq!(parse(&["--daemon".into()]).unwrap(), CliCommand::Daemon);
-    assert_eq!(parse(&["--trigger".into()]).unwrap(), CliCommand::Trigger);
+    assert_eq!(
+        parse(&["--trigger".into()]),
+        Err(CliError("unrecognised arguments: --trigger".into())),
+        "no arguments is the only way to send a Trigger"
+    );
     assert!(parse(&["--editor".into()]).is_err());
     assert!(parse(&["--bogus".into()]).is_err());
 }
