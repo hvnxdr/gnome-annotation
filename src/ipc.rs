@@ -244,7 +244,7 @@ enum SendError {
     Protocol(String),
 }
 
-/// The short-lived Print client: connect, send `capture`, exit once the daemon accepts.
+/// The short-lived Trigger client: connect, send `capture`, exit once the daemon accepts.
 pub struct TriggerClient {
     socket: PathBuf,
     exe: PathBuf,

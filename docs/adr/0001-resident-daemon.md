@@ -13,7 +13,7 @@ unsaved annotations. The daemon retains no capture history and drops the image,
 Annotation document, undo and redo state, and GPU resources when the Editor
 closes.
 
-The resident daemon is the default path for Print and reliable Copy. `--capture`
+The resident daemon is the default path for Triggers and reliable Copy. `--capture`
 and `--editor` remain supported one-shot paths. They work for editing and Save
 As. Their Copy depends on an external clipboard manager because the process
 exits when the Editor closes.

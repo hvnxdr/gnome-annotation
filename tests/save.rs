@@ -623,6 +623,56 @@ fn choosing_an_alias_of_the_original_capture_is_refused() {
 }
 
 #[test]
+fn choosing_a_hard_link_to_the_original_capture_is_refused() {
+    let dir = TempDir::new("save-original-hard-link");
+    let fixture = write_capture(dir.path());
+    let original = std::fs::read(&fixture).expect("read the capture");
+    let link = dir.path().join("linked.png");
+    std::fs::hard_link(&fixture, &link).expect("create the hard link");
+    let mut rt = dialog_editor(&fixture);
+
+    rt.key(ctrl_s());
+    rt.frame(0.0);
+    rt.resolve_file_dialog(Some(link))
+        .expect("the dialog is open");
+    rt.frame(0.0);
+
+    assert_eq!(rt.shell_request, None, "the editor stays open");
+    assert_eq!(
+        rt.state.error(),
+        Some("cannot overwrite the original capture")
+    );
+    assert_eq!(
+        std::fs::read(&fixture).expect("read the capture again"),
+        original,
+        "writing through the hard link would have destroyed the original"
+    );
+}
+
+#[test]
+fn save_as_is_refused_when_the_original_capture_cannot_be_checked() {
+    let dir = TempDir::new("save-original-missing");
+    let fixture = write_capture(dir.path());
+    let mut rt = dialog_editor(&fixture);
+    std::fs::remove_file(&fixture).expect("remove the capture after loading");
+    let chosen = dir.path().join("annotated.png");
+
+    rt.key(ctrl_s());
+    rt.frame(0.0);
+    rt.resolve_file_dialog(Some(chosen.clone()))
+        .expect("the dialog is open");
+    rt.frame(0.0);
+
+    assert_eq!(rt.shell_request, None, "the editor stays open");
+    let error = rt.state.error().expect("the refusal is shown");
+    assert!(
+        error.starts_with("cannot check the original capture"),
+        "{error}"
+    );
+    assert!(!chosen.exists(), "a refused save writes nothing");
+}
+
+#[test]
 fn copy_and_save_produce_identical_bytes_for_the_same_document() {
     let dir = TempDir::new("save-same-bytes");
     let fixture = write_capture(dir.path());

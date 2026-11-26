@@ -6,8 +6,8 @@ session, and producing one PNG through Copy or Save As.
 ## Capture flow
 
 **Trigger**:
-A request to start a Capture or request focus for the open Editor. The Print key
-sends a Trigger.
+A request to start a Capture or request focus for the open Editor. Running the
+binary with no arguments sends a Trigger.
 _Avoid_: shortcut, key press
 
 **Capture**:

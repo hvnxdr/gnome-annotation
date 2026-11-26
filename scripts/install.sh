@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Install or remove gnome-annotation for the current user: the binary, a desktop entry, an
-# autostart entry for the daemon, and a Print custom keybinding.
+# Install or remove gnome-annotation for the current user: the binary, a desktop entry, and an
+# autostart entry for the daemon. GNOME keybinding settings are never read or changed.
 #
 #   scripts/install.sh              install
 #   scripts/install.sh --uninstall  remove exactly what install added
 #   scripts/install.sh --help       this text
 #
-# HOME, XDG_BIN_HOME, XDG_DATA_HOME, XDG_CONFIG_HOME and GSETTINGS are respected. The test
-# suite points GSETTINGS at a fake and GNOME_ANNOTATION_BIN at a prepared file.
+# HOME, XDG_BIN_HOME, XDG_DATA_HOME and XDG_CONFIG_HOME are respected. The test suite points
+# GNOME_ANNOTATION_BIN at a prepared file.
 
 set -euo pipefail
 
@@ -16,12 +16,6 @@ BIN_NAME=gnome-annotation
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
-GSETTINGS="${GSETTINGS:-gsettings}"
-
-MEDIA_SCHEMA=org.gnome.settings-daemon.plugins.media-keys
-MEDIA_KEY=custom-keybindings
-KEYBINDING_PATH=/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/gnome-annotation/
-KEYBINDING_SCHEMA="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEYBINDING_PATH"
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
@@ -31,68 +25,15 @@ usage() {
 Usage: scripts/install.sh [--uninstall]
 
 Installs $BIN_NAME to $BIN_DIR, writes
-$DATA_DIR/applications/$APP_ID.desktop and
-$CONFIG_DIR/autostart/$APP_ID.desktop, and binds Print to the trigger.
+$DATA_DIR/applications/$APP_ID.desktop
+and $CONFIG_DIR/autostart/$APP_ID.desktop.
 
---uninstall removes only those files and that keybinding.
+--uninstall removes only those files.
 EOF
 }
 
 warn() {
     printf 'install: %s\n' "$*" >&2
-}
-
-trim() {
-    local value=$1
-    value="${value#"${value%%[![:space:]]*}"}"
-    value="${value%"${value##*[![:space:]]}"}"
-    printf '%s' "$value"
-}
-
-have_gsettings() {
-    command -v "$GSETTINGS" >/dev/null 2>&1
-}
-
-# Keep this in sync with the array gsettings prints. Entries are quoted object paths.
-read_keybindings() {
-    ENTRIES=()
-    local raw item
-    raw=$("$GSETTINGS" get "$MEDIA_SCHEMA" "$MEDIA_KEY" 2>/dev/null) || raw='@as []'
-    raw=$(trim "$raw")
-    case "$raw" in
-        '' | '[]' | '@as []' | '@as[]') return 0 ;;
-    esac
-    raw=${raw#[}
-    raw=${raw%]}
-    local IFS=','
-    for item in $raw; do
-        item=$(trim "$item")
-        item=${item#\'}
-        item=${item%\'}
-        item=${item#\"}
-        item=${item%\"}
-        [ -n "$item" ] && ENTRIES+=("$item")
-    done
-}
-
-has_entry() {
-    local needle=$1 entry
-    for entry in "${ENTRIES[@]}"; do
-        [ "$entry" = "$needle" ] && return 0
-    done
-    return 1
-}
-
-format_keybindings() {
-    local out='' entry
-    for entry in "${ENTRIES[@]}"; do
-        if [ -z "$out" ]; then
-            out="'$entry'"
-        else
-            out="$out, '$entry'"
-        fi
-    done
-    printf '[%s]' "$out"
 }
 
 # Quote an Exec value that contains spaces, as the desktop entry spec asks.
@@ -144,7 +85,7 @@ install_autostart_entry() {
 [Desktop Entry]
 Type=Application
 Name=$BIN_NAME
-Comment=Listen for the Print key and open GNOME's screenshot UI
+Comment=Keep the annotation daemon running
 Exec=$(desktop_exec "$BIN_DIR/$BIN_NAME") --daemon
 Terminal=false
 X-GNOME-Autostart-enabled=true
@@ -152,54 +93,14 @@ EOF
     printf 'install: %s\n' "$path"
 }
 
-install_keybinding() {
-    if ! have_gsettings; then
-        warn "gsettings is not available; Print was not bound"
-        return 0
-    fi
-    read_keybindings
-    if ! has_entry "$KEYBINDING_PATH"; then
-        ENTRIES+=("$KEYBINDING_PATH")
-        "$GSETTINGS" set "$MEDIA_SCHEMA" "$MEDIA_KEY" "$(format_keybindings)"
-    fi
-    local command
-    command="$(desktop_exec "$BIN_DIR/$BIN_NAME") --trigger"
-    "$GSETTINGS" set "$KEYBINDING_SCHEMA" name "$BIN_NAME"
-    "$GSETTINGS" set "$KEYBINDING_SCHEMA" command "$command"
-    "$GSETTINGS" set "$KEYBINDING_SCHEMA" binding "Print"
-    printf 'install: Print -> %s\n' "$command"
-}
-
-remove_keybinding() {
-    if ! have_gsettings; then
-        warn "gsettings is not available; the Print binding was left alone"
-        return 0
-    fi
-    read_keybindings
-    if has_entry "$KEYBINDING_PATH"; then
-        local kept=()
-        for entry in "${ENTRIES[@]}"; do
-            [ "$entry" = "$KEYBINDING_PATH" ] || kept+=("$entry")
-        done
-        ENTRIES=("${kept[@]}")
-        "$GSETTINGS" set "$MEDIA_SCHEMA" "$MEDIA_KEY" "$(format_keybindings)"
-    fi
-    "$GSETTINGS" reset "$KEYBINDING_SCHEMA" name 2>/dev/null || true
-    "$GSETTINGS" reset "$KEYBINDING_SCHEMA" command 2>/dev/null || true
-    "$GSETTINGS" reset "$KEYBINDING_SCHEMA" binding 2>/dev/null || true
-    printf 'install: removed the Print binding\n'
-}
-
 install_main() {
     install_binary
     install_desktop_entry
     install_autostart_entry
-    install_keybinding
-    printf 'install: done. Press Print to capture.\n'
+    printf 'install: done\n'
 }
 
 uninstall_main() {
-    remove_keybinding
     rm -f "$BIN_DIR/$BIN_NAME"
     rm -f "$DATA_DIR/applications/$APP_ID.desktop"
     rm -f "$CONFIG_DIR/autostart/$APP_ID.desktop"
